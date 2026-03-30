@@ -53,13 +53,25 @@ def generate(provider, prompt, system, model, max_tokens, temp, json_format):
     """
     Generate text using a specific provider (mlx, ollama, or openrouter).
 
-    EXAMPLES:\n
-    1. Local MLX (Apple Silicon Native):\n
-       event-horizon generate mlx "Write a Rust function" --system "You are a senior coder"\n\n
-    2. Ollama (Multi-model support):\n
-       event-horizon generate ollama "What is the capital of France?" --model llama3.1\n\n
-    3. OpenRouter (Remote fallback):\n
+    EXAMPLES:
+
+    1. Local MLX (Apple Silicon Native / Default Model):
+       event-horizon generate mlx "Explain the event horizon"
+
+    2. Local MLX (Specific HuggingFace ID):
+       event-horizon generate mlx "Write a Rust function" --model "mlx-community/Llama-3.2-3B-Instruct-4bit"
+
+    3. Ollama (Standard Local Service):
+       event-horizon generate ollama "What is the capital of France?" --model llama3.1
+
+    4. Ollama (Coding Specific):
+       event-horizon generate ollama "Refactor this code..." --model qwen2.5-coder:14b
+
+    5. OpenRouter (Remote Fallback):
        event-horizon generate openrouter "Complex reasoning..." --model "anthropic/claude-3-opus"
+
+    6. Custom Sampling:
+       event-horizon generate mlx "Creative story" --temp 0.9 --max-tokens 2000
     """
     try:
         kwargs = {"max_tokens": max_tokens, "temperature": temp}
