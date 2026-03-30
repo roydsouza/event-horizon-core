@@ -1,0 +1,2 @@
+[console_scripts]
+event-horizon = event_horizon_core.cli:main

@@ -1,0 +1,19 @@
+[project]
+name = "event-horizon-core"
+version = "0.1.0"
+description = "Unified Local LLM Inference Bridge for MLX and Ollama"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mlx-lm",
+    "httpx",
+    "pydantic",
+    "click",
+]
+
+[project.scripts]
+event-horizon = "event_horizon_core.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
