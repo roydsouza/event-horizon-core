@@ -17,7 +17,7 @@ class OllamaProvider(BaseLLMProvider):
         self.model = model
         self.client = httpx.Client(timeout=60.0)
 
-    def generate(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
+    def generate(self, prompt: str, system_prompt: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
         url = f"{self.base_url}/api/chat"
         
         messages = []
@@ -29,6 +29,7 @@ class OllamaProvider(BaseLLMProvider):
             "model": self.model,
             "messages": messages,
             "stream": False,
+            "tools": tools,
             "options": {
                 "temperature": kwargs.get("temperature", 0.7),
                 "num_predict": kwargs.get("max_tokens", 1000)

@@ -16,7 +16,7 @@ class MLXProvider(BaseLLMProvider):
     Apple Silicon Native MLX Inference Engine.
     """
 
-    def __init__(self, model_path: str = "mlx-community/Llama-3.2-3B-Instruct-4bit"):
+    def __init__(self, model_path: str = "mlx-community/Llama-3.2-3B-Instruct-4bit", **kwargs):
         self.model_path = model_path
         self.model = None
         self.tokenizer = None
@@ -24,14 +24,33 @@ class MLXProvider(BaseLLMProvider):
         if load is None:
             logger.warning("mlx_lm not installed. MLXProvider will be unavailable.")
 
+    def get_vram_estimate(self) -> float:
+        """
+        Estimates VRAM usage based on parameter count.
+        For 4-bit models, it's roughly 0.6 GB per 1B parameters + 1GB overhead.
+        """
+        # Extract parameter count from path if possible (e.g. 3B, 8B, 70B)
+        import re
+        match = re.search(r"(\d+)[Bb]", self.model_path)
+        if match:
+            params = int(match.group(1))
+            return (params * 0.6) + 1.5 # 1.5GB overhead for KV cache/Metal
+        return 4.0 # Default fallback
+
     def _ensure_model(self):
         if self.model is None:
             if load is None:
                 raise ImportError("mlx_lm is not installed. Please install it with 'pip install mlx-lm'.")
-            logger.info(f"Loading MLX model: {self.model_path}")
+            
+            # Hardware Guard (Apple Silicon M5 24GB)
+            estimate = self.get_vram_estimate()
+            if estimate > 22.0: # Leaving 2GB buffer for OS/UI
+                raise MemoryError(f"Model {self.model_path} estimated VRAM ({estimate}GB) exceeds safe limit (22GB).")
+            
+            logger.info(f"Loading MLX model: {self.model_path} (Est. VRAM: {estimate}GB)")
             self.model, self.tokenizer = load(self.model_path)
 
-    def generate(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
+    def generate(self, prompt: str, system_prompt: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
         self._ensure_model()
         
         # Prepare system prompt for Llama-style instruct models if applicable
@@ -41,7 +60,8 @@ class MLXProvider(BaseLLMProvider):
             formatted_prompt = prompt
 
         max_tokens = kwargs.get("max_tokens", 1000)
-        return generate(self.model, self.tokenizer, prompt=formatted_prompt, verbose=False, max_tokens=max_tokens)
+        temp = kwargs.get("temperature", 0.7)
+        return generate(self.model, self.tokenizer, prompt=formatted_prompt, verbose=False, max_tokens=max_tokens, temp=temp)
 
     def is_healthy(self) -> bool:
         return load is not None

@@ -2,6 +2,7 @@ from typing import Dict, Any, Type, Optional
 from .providers.base import BaseLLMProvider
 from .providers.mlx_provider import MLXProvider
 from .providers.ollama_provider import OllamaProvider
+from .providers.openrouter_provider import OpenRouterProvider
 
 class LLMFactory:
     """
@@ -10,7 +11,8 @@ class LLMFactory:
 
     PROVIDERS: Dict[str, Type[BaseLLMProvider]] = {
         "mlx": MLXProvider,
-        "ollama": OllamaProvider
+        "ollama": OllamaProvider,
+        "openrouter": OpenRouterProvider
     }
 
     @classmethod

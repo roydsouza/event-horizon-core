@@ -7,8 +7,8 @@ class BaseLLMProvider(ABC):
     """
 
     @abstractmethod
-    def generate(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
-        """Generates a completion based on a prompt."""
+    def generate(self, prompt: str, system_prompt: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
+        """Generates a completion based on a prompt. Supports optional tool definitions."""
         pass
 
     @abstractmethod
