@@ -1,16 +1,13 @@
 Metadata-Version: 2.4
 Name: event-horizon-core
 Version: 0.1.0
-Summary: Unified Local LLM Inference Bridge for MLX and Ollama
+Summary: M5-Optimized Local LLM Inference Bridge
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: mlx-lm
-Requires-Dist: httpx
-Requires-Dist: pydantic
+Requires-Dist: requests
 Requires-Dist: click
 Requires-Dist: python-dotenv
-Requires-Dist: pytest
-Requires-Dist: pytest-asyncio
 
 # Event Horizon Core
 
@@ -18,11 +15,12 @@ Unified Local LLM Inference Bridge for Apple Silicon.
 Designed for high-performance, private, and local-first AI experimentation.
 
 ## Features
-- **MLX Provider**: Direct, low-latency inference on Apple Silicon (M1/M2/M3/M4/M5) using Metal.
-- **Ollama Provider**: Robust, multi-model support via the Ollama API/CLI.
+- **MLX Provider**: Direct, low-latency inference on Apple Silicon (M5 optimized) using Metal.
+- **Llama.cpp Provider**: High-performance GGUF support via native `llama-server`.
+- **Ollama Provider (Legacy)**: Standard Ollama API support for existing workflows.
 - **OpenRouter Provider**: Remote fallback for high-reasoning tasks (Gemini 2.0, Claude 3.5).
 - **Unified CLI**: Single tool to manage and query all local and remote models.
-- **uv-Powered**: High-performance dependency management and isolated environments.
+- **Performance Logging**: Real-world tok/s and latency tracking for every request.
 
 ## Installation & Setup
 
@@ -31,12 +29,21 @@ Designed for high-performance, private, and local-first AI experimentation.
    curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
 
-2. **Sync the environment**:
+2. **Install Inference Engines**:
+   ```bash
+   # Native MLX
+   uv pip install mlx-lm
+   
+   # Native Llama.cpp (Homebrew recommended)
+   brew install llama.cpp
+   ```
+
+3. **Sync the environment**:
    ```bash
    uv sync
    ```
 
-3. **Configure Environment Variables**:
+4. **Configure Environment Variables**:
    Copy `.env.template` to `.env` and add your `OPENROUTER_API_KEY`.
 
 ## CLI Usage
@@ -44,17 +51,26 @@ Designed for high-performance, private, and local-first AI experimentation.
 All commands should be prefixed with `uv run` to use the managed environment:
 
 ```bash
+# View the detailed help page and command list
+uv run event-horizon help 
+
 # Check status of all providers (Local & Remote)
 uv run event-horizon status
 
-# Generate text using MLX (Fastest on Mac)
+# List models available on specific local/remote backends
+uv run event-horizon mlx
+uv run event-horizon llamacpp
+uv run event-horizon openrouter
+
+# Generate text using MLX (Fastest on Mac - Tier 1)
 uv run event-horizon generate mlx "Explain quantum computing."
 
-# Generate text using OpenRouter (Remote Fallback)
-uv run event-horizon generate openrouter "Complex reasoning task..." --model "google/gemini-2.0-flash-001"
+# Generate text using Llama.cpp (Native Fallback - Tier 2)
+# Ensure llama-server is running on port 8081
+uv run event-horizon generate llamacpp "What is the event horizon?" 
 
-# Generate text using Ollama
-uv run event-horizon generate ollama "What is the event horizon?" --model llama3.2
+# Generate text using OpenRouter (Remote Fallback - Tier 3)
+uv run event-horizon generate openrouter "Complex reasoning..." --model best
 ```
 
 ## 🛠️ Performance & Concurrency
@@ -65,25 +81,54 @@ Event Horizon Core is optimized for **Apple Silicon M5 (24GB RAM)**.
 - **Unified Memory**: Local models share the 24GB pool with your OS and applications. For large models (14B+), close high-memory apps (Chrome, IDEs) for optimal performance.
 
 ### Concurrency 
-- **Ollama**: Automatically handles request queueing. Subsequent calls will wait for the first to complete.
-- **MLX**: Uses a single-process Metal lock. Multiple concurrent MLX calls might result in Resource Contention leading to failure. 
-- **Roadmap**: A unified cross-provider locking/queue system is planned for Phase 3.
+- **MLX/Llama.cpp**: Shared local GPU resources are managed by the Core Orchestrator. 
+- **Roadmap**: A unified cross-provider locking/queue system is implemented in Phase 4.
 
 ## 🏗️ Architecture: Multi-Agent Orchestration
 
-Event Horizon Core acts as a **Unified Traffic Controller** for all your agents (OpenClaw, OpenFang, Hermes, etc.) on Apple Silicon.
+Event Horizon Core acts as a **Unified Traffic Controller** for all your agents on Apple Silicon.
 
-### How it Works for Multiple Concurrent Users:
-1. **Single Entry Point**: All agents communicate through this bridge instead of managing their own MLX or OpenRouter logic. This prevents VRAM fragmentation and secret leakage.
-2. **Resource Guarding**: The core monitors your M5 GPU (24GB). If one agent (e.g., OpenClaw) is using the GPU, subsequent requests from others are either:
-    - **Queued**: Lined up for the next available GPU cycle.
-    - **Routed**: Automatically sent to **OpenRouter** if the local GPU is saturated or a timeout is imminent.
-3. **Unified Secrets**: All API keys and model paths are managed in a single `.env` file, shared across all agentic frameworks.
+### The Intended Inference Hierarchy
+To optimize for the **Apple Silicon M5 (24GB)**, the core follows this priority logic:
+
+1.  **Tier 1: MLX (Primary / Native)**: Metal-optimized direct inference. Fastest tok/s and lowest latency.
+    - *Default Port*: 8080 (`mlx_lm.server`)
+2.  **Tier 2: Llama.cpp (Native Fallback)**: Fastest GGUF execution. Used if MLX is locked.
+    - *Default Port*: 8081 (`llama-server`)
+3.  **Tier 3: OpenRouter (Remote Fallback)**: Used for high-reasoning tasks (best/reasoner) or saturated local resources.
+4.  **Tier 4: Ollama (Legacy)**: Maintained for backward compatibility.
+
+### Running the Backends
+For full orchestration, start both native servers in separate terminals:
+```bash
+# Terminal 1: MLX
+uv run mlx_lm.server --model mlx-community/Llama-3.2-3B-Instruct-4bit --port 8080
+
+# Terminal 2: Llama.cpp
+llama-server -m ~/path/to/model.gguf --port 8081
+```
+
+### Fetching GGUF Models for Llama.cpp
+To use `llama-server`, you must provide it with a local model in the `.gguf` format. You can download one easily using the `huggingface-cli`:
+
+```bash
+# 1. Install huggingface-cli (if needed)
+uv pip install -U "huggingface_hub[cli]"
+
+# 2. Download a high-performance quantized model (e.g. Q4_K_M)
+huggingface-cli download \
+  bartowski/Meta-Llama-3.1-8B-Instruct-GGUF \
+  --include "*Q4_K_M.gguf" \
+  --local-dir ~/models
+
+# 3. Boot the Llama.cpp server on Port 8081
+llama-server -m ~/models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf --port 8081
+```
 
 ### Integration Patterns:
 - **CLI Wrapper**: For simple scripts (`uv run event-horizon generate mlx`).
-- **Python Library**: Direct import for high-performance Python agents (`from event_horizon_core import LLMFactory`).
-- **OpenAI-Compatible Server**: (Phase 4 Roadmap) A local API server that mimics OpenAI, allowing any standard agent to connect by simply changing its `BASE_URL` to `http://localhost:8000/v1`.
+- **Python Library**: Direct import for Python agents (`from event_horizon_core import LLMFactory`).
+- **OpenAI-Compatible Server**: (Phase 6 Roadmap) Unified local endpoint.
 
 ## 🤖 Agent Integration (Clients)
 
@@ -105,3 +150,14 @@ To use this core in your `~/anthropic` projects, follow the [Anthropic Setup Gui
 ## Documentation
 - [Anthropic Setup](docs/ANTHROPIC_SETUP.md)
 - [Developer Guide](docs/DEVELOPER_GUIDE.md)
+
+---
+
+## 🚀 Developer Handoff (Go Migration)
+> **Note to Automations/Agents**: Event Horizon Core is currently transitioning from Python to a Go-based zero-dependency daemon (Phase 7). 
+> 
+> **Architectural Constraints for Junior Agents (Flash):**
+> 1. The target language is Go 1.22+.
+> 2. The routing framework must be the standard `net/http` package. Do not install external HTTP parsers.
+> 3. The Go daemon must natively supervise the `mlx_lm.server` via `os/exec` and `syscall.SysProcAttr{Setpgid: true}` to prevent Apple Silicon VRAM zombie leaks.
+> 4. **Dynamic Model Swapping**: Must be implemented via blocking HTTP middleware in Go that safely restarts the underlying MLX process when an incoming model mismatch occurs, forwarding the HTTP request only after the port is healthy.

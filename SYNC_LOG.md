@@ -1,5 +1,23 @@
 # Synchronization Log
 
+- **2026-03-31 14:00:00 PDT**: **Phase 9: Python Eradication & Final M5 Optimization Complete**.
+    - **Thin-Client Refactor**: Overhauled `event_horizon_core/cli.py` to act as a high-speed proxy. It now utilizes the `requests` library to communicate with the Go Daemon on Port 8000, preserving the `uv run event-horizon` workflow while offloading all logic to the Go substrate.
+    - **Logic Purge**: Deleted `orchestrator.py`, `factory.py`, and the entire `providers/` directory. All manual VRAM locking, queueing, and fallback logic is now handled natively by Goroutines and blocking Go middleware.
+    - **Dependency Pruning**: Cleaned up `pyproject.toml`, removing `httpx`, `pydantic`, and `pytest-asyncio`. Added `requests` as the sole networking dependency for the CLI. Retained `mlx-lm` for the supervised inference engine.
+    - **Verification**: Confirmed `uv run event-horizon status` and `generate` commands are fully functional and correctly trigger hot-swaps in the background daemon. 
+    - **Hardware State**: Prefix Caching and Speculative Decoding are active by default in the Go supervisor, achieving optimal TTFT on the Apple Silicon M5.
+
+- **2026-03-31 12:00:00 PDT**: **Architectural Handoff: Go Daemon Migration & Dynamic Model Swapping**.
+    - **Decision**: Python is being retired for the orchestration layer. The Go Standard Library (`net/http`) will replace it to support an ultra-low footprint, massively concurrent REST proxy on port `8000`.
+    - **Active Supervision**: Go `os/exec` will manage `mlx_lm.server` (Tier 1) and `llama-server` (Tier 2).
+    - **Anti-Zombie Strategy**: Subprocesses will be tied to Process Groups (`syscall.SysProcAttr{Setpgid: true}`) so that a single `SIGKILL` destroys the entire execution tree if the Go proxy crashes.
+    - **Dynamic Model Swapping**: Approved. If a client requests a model not currently active in VRAM, the Go daemon will intercept the HTTP request, cleanly terminate the active MLX server, boot the new model, wait for port health, and then release/forward the request. Clients will experience a TTFT delay (e.g., ~3-5 seconds) rather than a failure.
+    - **handoff_instructions_for_junior_model (Flash)**: 
+        1. Initialize `go mod` and set up the `net/http` router.
+        2. DO NOT use Fiber or external web frameworks. Stick to `net/http`.
+        3. Implement the `os/exec` supervision exactly as described above to avoid memory leaks.
+        4. Refer to `TASKS.md` Phases 7-9 for the step-by-step implementation plan.
+
 - **2026-03-31 06:25:00 PDT**: **Phase 5: Substrate Refactor and Provider Pivots**.
     - **Performance Benchmarking**: Created `scripts/bench_performance.py` mapping TTFT and tok/s. Confirmed MLX native achieves ~52 tok/s vs Ollama's ~15 tok/s for comparable Llama 3 parameters on the M5 chip.
     - **Telemetry Upgrade**: Overhauled BaseLLMProvider to return a structured `ProviderResponse` object containing `UsageMetadata` (token tracking and generation time metrics). Integrated real-time performance footer into CLI responses.

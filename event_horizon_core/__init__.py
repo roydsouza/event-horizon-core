@@ -1,5 +1,2 @@
-from .factory import LLMFactory
-from .providers.mlx_provider import MLXProvider
-from .providers.ollama_provider import OllamaProvider
-
-__all__ = ["LLMFactory", "MLXProvider", "OllamaProvider"]
+__version__ = "0.1.0"
+__all__ = []

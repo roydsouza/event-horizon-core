@@ -1,21 +1,21 @@
 [project]
 name = "event-horizon-core"
 version = "0.1.0"
-description = "Unified Local LLM Inference Bridge for MLX and Ollama"
+description = "M5-Optimized Local LLM Inference Bridge"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "mlx-lm",
-    "httpx",
-    "pydantic",
+    "requests",
     "click",
     "python-dotenv",
-    "pytest",
-    "pytest-asyncio",
 ]
 
 [project.scripts]
 event-horizon = "event_horizon_core.cli:main"
+
+[tool.setuptools]
+packages = ["event_horizon_core"]
 
 [build-system]
 requires = ["setuptools>=61.0"]

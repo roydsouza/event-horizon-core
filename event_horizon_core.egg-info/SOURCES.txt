@@ -2,17 +2,11 @@ README.md
 pyproject.toml
 event_horizon_core/__init__.py
 event_horizon_core/cli.py
-event_horizon_core/factory.py
 event_horizon_core.egg-info/PKG-INFO
 event_horizon_core.egg-info/SOURCES.txt
 event_horizon_core.egg-info/dependency_links.txt
 event_horizon_core.egg-info/entry_points.txt
 event_horizon_core.egg-info/requires.txt
 event_horizon_core.egg-info/top_level.txt
-event_horizon_core/providers/__init__.py
-event_horizon_core/providers/base.py
-event_horizon_core/providers/mlx_provider.py
-event_horizon_core/providers/ollama_provider.py
-event_horizon_core/providers/openrouter_provider.py
 tests/test_core.py
 tests/test_torture.py
