@@ -8,3 +8,100 @@ Requires-Dist: mlx-lm
 Requires-Dist: httpx
 Requires-Dist: pydantic
 Requires-Dist: click
+Requires-Dist: python-dotenv
+Requires-Dist: pytest
+Requires-Dist: pytest-asyncio
+
+# Event Horizon Core
+
+Unified Local LLM Inference Bridge for Apple Silicon. 
+Designed for high-performance, private, and local-first AI experimentation.
+
+## Features
+- **MLX Provider**: Direct, low-latency inference on Apple Silicon (M1/M2/M3/M4/M5) using Metal.
+- **Ollama Provider**: Robust, multi-model support via the Ollama API/CLI.
+- **OpenRouter Provider**: Remote fallback for high-reasoning tasks (Gemini 2.0, Claude 3.5).
+- **Unified CLI**: Single tool to manage and query all local and remote models.
+- **uv-Powered**: High-performance dependency management and isolated environments.
+
+## Installation & Setup
+
+1. **Install uv** (if not already installed):
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+2. **Sync the environment**:
+   ```bash
+   uv sync
+   ```
+
+3. **Configure Environment Variables**:
+   Copy `.env.template` to `.env` and add your `OPENROUTER_API_KEY`.
+
+## CLI Usage
+
+All commands should be prefixed with `uv run` to use the managed environment:
+
+```bash
+# Check status of all providers (Local & Remote)
+uv run event-horizon status
+
+# Generate text using MLX (Fastest on Mac)
+uv run event-horizon generate mlx "Explain quantum computing."
+
+# Generate text using OpenRouter (Remote Fallback)
+uv run event-horizon generate openrouter "Complex reasoning task..." --model "google/gemini-2.0-flash-001"
+
+# Generate text using Ollama
+uv run event-horizon generate ollama "What is the event horizon?" --model llama3.2
+```
+
+## 🛠️ Performance & Concurrency
+
+### Hardware Boundaries (M5 24GB Unified Memory)
+Event Horizon Core is optimized for **Apple Silicon M5 (24GB RAM)**. 
+- **VRAM Guard**: `MLXProvider` will now calculate estimated VRAM before loading. If a model (e.g. 70B variant) exceeds **22GB**, the load will be aborted to prevent OS instability.
+- **Unified Memory**: Local models share the 24GB pool with your OS and applications. For large models (14B+), close high-memory apps (Chrome, IDEs) for optimal performance.
+
+### Concurrency 
+- **Ollama**: Automatically handles request queueing. Subsequent calls will wait for the first to complete.
+- **MLX**: Uses a single-process Metal lock. Multiple concurrent MLX calls might result in Resource Contention leading to failure. 
+- **Roadmap**: A unified cross-provider locking/queue system is planned for Phase 3.
+
+## 🏗️ Architecture: Multi-Agent Orchestration
+
+Event Horizon Core acts as a **Unified Traffic Controller** for all your agents (OpenClaw, OpenFang, Hermes, etc.) on Apple Silicon.
+
+### How it Works for Multiple Concurrent Users:
+1. **Single Entry Point**: All agents communicate through this bridge instead of managing their own MLX or OpenRouter logic. This prevents VRAM fragmentation and secret leakage.
+2. **Resource Guarding**: The core monitors your M5 GPU (24GB). If one agent (e.g., OpenClaw) is using the GPU, subsequent requests from others are either:
+    - **Queued**: Lined up for the next available GPU cycle.
+    - **Routed**: Automatically sent to **OpenRouter** if the local GPU is saturated or a timeout is imminent.
+3. **Unified Secrets**: All API keys and model paths are managed in a single `.env` file, shared across all agentic frameworks.
+
+### Integration Patterns:
+- **CLI Wrapper**: For simple scripts (`uv run event-horizon generate mlx`).
+- **Python Library**: Direct import for high-performance Python agents (`from event_horizon_core import LLMFactory`).
+- **OpenAI-Compatible Server**: (Phase 4 Roadmap) A local API server that mimics OpenAI, allowing any standard agent to connect by simply changing its `BASE_URL` to `http://localhost:8000/v1`.
+
+## 🤖 Agent Integration (Clients)
+
+The following agentic frameworks can be hooked into Event Horizon Core:
+
+| Client | Interface | Setup Guide |
+| :--- | :--- | :--- |
+| **OpenCode** | CLI / Config | [Guide](docs/clients/OPENCODE_SETUP.md) |
+| **Tachyon Tongs** | Python Stub | [Stubbing Info](README.md#stubbing) |
+| **OpenClaw** | Backend | [Guide](docs/clients/OPENCLAW_SETUP.md) |
+| **ZeroClaw** | Backend | [Guide](docs/clients/ZEROCLAW_SETUP.md) |
+| **OpenFang** | Backend | [Guide](docs/clients/OPENFANG_SETUP.md) |
+| **Hermes** | Backend | [Guide](docs/clients/HERMES_AGENT_SETUP.md) |
+
+## 🧩 Anthropic Integration
+
+To use this core in your `~/anthropic` projects, follow the [Anthropic Setup Guide](docs/ANTHROPIC_SETUP.md).
+
+## Documentation
+- [Anthropic Setup](docs/ANTHROPIC_SETUP.md)
+- [Developer Guide](docs/DEVELOPER_GUIDE.md)

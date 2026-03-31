@@ -1,76 +1,99 @@
 import os
 import logging
+import httpx
 from typing import List, Optional, Dict, Any
-try:
-    from mlx_lm import load, generate
-except ImportError:
-    load = None
-    generate = None
 
-from .base import BaseLLMProvider
+from .base import BaseLLMProvider, ProviderResponse, UsageMetadata
 
 logger = logging.getLogger("event_horizon_core.providers.mlx")
 
 class MLXProvider(BaseLLMProvider):
     """
-    Apple Silicon Native MLX Inference Engine.
+    Remote Native MLX Provider.
+    Wraps mlx_lm.server for unified memory, KV caching, and multi-process safety.
     """
 
-    def __init__(self, model_path: str = "mlx-community/Llama-3.2-3B-Instruct-4bit", **kwargs):
+    def __init__(self, model_path: str = "mlx-community/Llama-3.2-3B-Instruct-4bit", base_url: str = "http://127.0.0.1:8080", **kwargs):
         self.model_path = model_path
-        self.model = None
-        self.tokenizer = None
-        
-        if load is None:
-            logger.warning("mlx_lm not installed. MLXProvider will be unavailable.")
+        self.base_url = base_url.rstrip("/")
+        self.timeout = kwargs.get("timeout", 300.0)
 
-    def get_vram_estimate(self) -> float:
+    def generate(self, prompt: str, system_prompt: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> ProviderResponse:
         """
-        Estimates VRAM usage based on parameter count.
-        For 4-bit models, it's roughly 0.6 GB per 1B parameters + 1GB overhead.
+        Sends generation request to the mlx_lm.server.
         """
-        # Extract parameter count from path if possible (e.g. 3B, 8B, 70B)
-        import re
-        match = re.search(r"(\d+)[Bb]", self.model_path)
-        if match:
-            params = int(match.group(1))
-            return (params * 0.6) + 1.5 # 1.5GB overhead for KV cache/Metal
-        return 4.0 # Default fallback
-
-    def _ensure_model(self):
-        if self.model is None:
-            if load is None:
-                raise ImportError("mlx_lm is not installed. Please install it with 'pip install mlx-lm'.")
-            
-            # Hardware Guard (Apple Silicon M5 24GB)
-            estimate = self.get_vram_estimate()
-            if estimate > 22.0: # Leaving 2GB buffer for OS/UI
-                raise MemoryError(f"Model {self.model_path} estimated VRAM ({estimate}GB) exceeds safe limit (22GB).")
-            
-            logger.info(f"Loading MLX model: {self.model_path} (Est. VRAM: {estimate}GB)")
-            self.model, self.tokenizer = load(self.model_path)
-
-    def generate(self, prompt: str, system_prompt: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
-        self._ensure_model()
+        import time
+        from .base import ProviderResponse, UsageMetadata
         
-        # Prepare system prompt for Llama-style instruct models if applicable
+        url = f"{self.base_url}/v1/chat/completions"
+        
+        messages = []
         if system_prompt:
-            formatted_prompt = f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
-        else:
-            formatted_prompt = prompt
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
 
-        max_tokens = kwargs.get("max_tokens", 1000)
-        temp = kwargs.get("temperature", 0.7)
-        return generate(self.model, self.tokenizer, prompt=formatted_prompt, verbose=False, max_tokens=max_tokens, temp=temp)
+        payload = {
+            "model": self.model_path,
+            "messages": messages,
+            "max_tokens": kwargs.get("max_tokens", 1000),
+            "temperature": kwargs.get("temperature", 0.7),
+            "top_p": kwargs.get("top_p", 1.0),
+            "stream": False
+        }
+
+        start_time = time.time()
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                
+                duration = time.time() - start_time
+                text = data["choices"][0]["message"]["content"]
+                
+                # Extract Usage
+                usage_data = data.get("usage", {})
+                usage = UsageMetadata(
+                    prompt_tokens=usage_data.get("prompt_tokens", 0),
+                    completion_tokens=usage_data.get("completion_tokens", 0),
+                    total_tokens=usage_data.get("total_tokens", 0),
+                    generation_time=duration
+                )
+                
+                return ProviderResponse(
+                    text=text,
+                    usage=usage,
+                    model=self.model_path,
+                    provider="mlx"
+                )
+        except Exception as e:
+            logger.error(f"MLX Server Error: {e}")
+            raise RuntimeError(f"Failed to generate completion from MLX server: {e}")
 
     def is_healthy(self) -> bool:
-        return load is not None
+        """
+        Checks if mlx_lm.server is responding on the configured port.
+        """
+        try:
+            with httpx.Client(timeout=2.0) as client:
+                response = client.get(f"{self.base_url}/v1/models")
+                return response.status_code == 200
+        except Exception:
+            return False
 
     def list_models(self) -> List[str]:
-        # Check ~/.cache/huggingface/hub for mlx models
-        cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-        if not os.path.exists(cache_dir):
-            return []
-        
-        models = [d for d in os.listdir(cache_dir) if "mlx" in d.lower()]
-        return models
+        """
+        Lists models available on the server.
+        """
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(f"{self.base_url}/v1/models")
+                response.raise_for_status()
+                data = response.json()
+                return [m["id"] for m in data.get("data", [])]
+        except Exception:
+            # Fallback to local cache check if server is down
+            cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+            if not os.path.exists(cache_dir):
+                return []
+            return [d for d in os.listdir(cache_dir) if "mlx" in d.lower()]

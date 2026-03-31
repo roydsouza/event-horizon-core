@@ -3,7 +3,7 @@ import logging
 import subprocess
 from typing import List, Optional, Dict, Any
 
-from .base import BaseLLMProvider
+from .base import BaseLLMProvider, ProviderResponse, UsageMetadata
 
 logger = logging.getLogger("event_horizon_core.providers.ollama")
 
@@ -12,12 +12,15 @@ class OllamaProvider(BaseLLMProvider):
     Ollama-based Inference Engine.
     """
 
-    def __init__(self, base_url: str = "http://127.0.0.1:11434", model: str = "llama3.2"):
+    def __init__(self, base_url: str = "http://127.0.0.1:11434", model: str = "llama3.1:latest", **kwargs):
         self.base_url = base_url
         self.model = model
-        self.client = httpx.Client(timeout=60.0)
+        self.client = httpx.Client(timeout=300.0)
 
-    def generate(self, prompt: str, system_prompt: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
+    def generate(self, prompt: str, system_prompt: Optional[str] = None, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> ProviderResponse:
+        import time
+        from .base import ProviderResponse, UsageMetadata
+        
         url = f"{self.base_url}/api/chat"
         
         messages = []
@@ -36,11 +39,29 @@ class OllamaProvider(BaseLLMProvider):
             }
         }
 
+        start_time = time.time()
         try:
             response = self.client.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
-            return data["message"]["content"]
+            
+            duration = time.time() - start_time
+            text = data["message"]["content"]
+            
+            # Extract Usage
+            usage = UsageMetadata(
+                prompt_tokens=data.get("prompt_eval_count", 0),
+                completion_tokens=data.get("eval_count", 0),
+                total_tokens=data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
+                generation_time=duration
+            )
+            
+            return ProviderResponse(
+                text=text,
+                usage=usage,
+                model=self.model,
+                provider="ollama"
+            )
         except Exception as e:
             logger.error(f"Ollama inference failed: {e}")
             raise

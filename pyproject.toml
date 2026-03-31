@@ -9,6 +9,9 @@ dependencies = [
     "httpx",
     "pydantic",
     "click",
+    "python-dotenv",
+    "pytest",
+    "pytest-asyncio",
 ]
 
 [project.scripts]

@@ -8,7 +8,7 @@ async def test_torture_ollama_concurrency():
     """
     Stress test Ollama with multiple concurrent requests to verify internal queueing.
     """
-    provider = LLMFactory.get_provider("ollama", model="llama3.2")
+    provider = LLMFactory.get_provider("ollama", model="llama3.1:latest")
     
     # 5 concurrent requests
     prompts = [

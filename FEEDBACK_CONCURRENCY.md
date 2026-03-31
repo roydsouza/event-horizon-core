@@ -1494,4 +1494,935 @@ if __name__ == "__main__":
     else:
         print("Usage: python example_usage.py [direct|http|stress]")
 
+# Question:
 
+How do I detect instability in my implementation as models get more sophisticated over time, and make prefix caching more complicated? How can I monitor this and know when to step in with an enhancement?
+
+# Gemini:
+
+Detecting instability in local MLX implementations as models move toward hybrid architectures (like **Gemma 3** or **Qwen 3.5**) requires shifting your focus from simple "cache hits" to measuring **architectural compatibility** and **latency regressions**.
+
+### 1. The Primary Instability: "The Silent Recompute"
+As of March 2026, the most common form of "instability" isn't a crash, but a **performance collapse**. Modern models increasingly use non-standard layers that are fundamentally incompatible with traditional "trim-and-reuse" prefix caching.
+
+* **Hybrid SSM/Mamba Models (e.g., Qwen 3.5):** These use recurrent states that cannot be split or "trimmed" at arbitrary token boundaries like a standard KV cache.
+* **Sliding Window Models (e.g., Gemma 3):** These use circular buffers (`RotatingKVCache`). If your server tries to trim this cache to match a common prefix, the state often corrupts, forcing a silent fallback to full prompt recomputation.
+* **Multimodal RoPE (e.g., Qwen3-VL):** If you cache a text prefix and then inject an image, the positional embeddings (mRoPE) often break, causing the model to ignore new visual inputs or hallucinate wildly.
+
+### 2. Monitoring Stack: The "Check Engine" Lights
+To detect these issues in your concurrent agent scaffolding, monitor these four specific signals:
+
+| Metric | "Healthy" State | "Intervention Required" Signal |
+| :--- | :--- | :--- |
+| **TTFT (Time to First Token)** | Flat/Constant (e.g., <500ms) for warm requests. | Scales **linearly** with prefix length (e.g., 10s for 10k tokens). |
+| **Prefix Cache Hit Rate** | >80% for repetitive agent loops. | Drops below 10% or is consistently 0% for "warm" models. |
+| **Inter-Token Latency (ITL)** | Smooth and steady. | Spikes or "jitter," indicating **KV cache thrashing** or preemptions. |
+| **Context Length vs. VRAM** | High utilization but stable. | **Preemption count** > 0 (indicates the server is killing agent contexts to free RAM). |
+
+### 3. How to Detect Semantic & Functional Drift
+Instability can also be functional—where the cache "works" but the model becomes "stupid" or incoherent.
+
+* **Logit Divergence Checks:** Periodically compare the first 5–10 tokens of a "cached" generation against a "cold start" generation for the same prefix. If the probability distribution (logits) differs significantly, your cache implementation is likely corrupting **Position IDs** or **RoPE deltas**.
+* **The "Context Cliff" Test:** Monitor if your agent starts failing tasks specifically after $N$ turns. This often indicates your caching logic is failing to handle the **sliding window boundary** correctly.
+* **TTFT Benchmarking:** If you see your TTFT jump from 1s to 30s after adding a new agent to the scaffolding, it means your locking/queueing is causing "cache misses" by evicting the high-value system prompt blocks.
+
+### 4. When to Step In (Intervention Triggers)
+Enhance your scaffolding when you hit these specific thresholds:
+
+1.  **The "2-Second Rule":** If your TTFT for a "warm" request (reusing your system prompt) exceeds 2 seconds on your M5, your prefix caching is likely broken or disabled by a hybrid model architecture.
+2.  **The "Dynamic Injection" Failure:** If your agents inject small dynamic pieces (like a `timestamp` or `agent_id`) early in the system prompt, it invalidates everything downstream.
+    * *Enhancement:* Implement **Prompt Reordering** to move all dynamic variables to the very end of the prompt.
+3.  **VRAM Fragmentation:** If your "agentic firewall" and "OpenCode" are constantly fighting for the same 24GB, and you see `num_preemptions` rising in your logs.
+    * *Enhancement:* Move to an **SSD-Tiered KV Cache** (like `oMLX`) that swaps inactive agent states to your Mac's internal storage.
+
+**Would you like me to provide a Python script that uses `mlx-lm` to benchmark your TTFT and detect "Silent Recomputes"?**
+
+Claude: 
+
+Good timing to think about this — cache instability from model upgrades is one of those failure modes that's silent at first (outputs look fine, just subtly wrong) before it becomes catastrophic. There are four distinct failure classes to instrument for.
+
+## The four failure classes
+
+**1. Tokenizer drift** — a model upgrade changes how a prompt tokenizes. Your `token_len` stored in the registry is now wrong, so the "diff" you encode in `_blocking_inference` starts at the wrong offset. The prefix cache hits but poisons the output. This is the nastiest one because it doesn't throw — it just generates garbage.
+
+**2. Cache shape mismatch** — a new model architecture (GQA vs MHA, different head counts, sliding window attention) produces cache arrays with different shapes. Your `mx.load` from disk either silently broadcasts to a wrong shape or raises during the forward pass.
+
+**3. Context budget creep** — newer models advertise 128K context but your `max_token_len` guard was set for 8K. Long-running agents accumulate caches you never expected to be that large, then spill to disk constantly, defeating the purpose.
+
+**4. Semantic divergence** — even with correct shapes and tokenization, a fine-tuned or quantised update shifts the model's internal representations enough that a cached prefix from v1 leads to measurably different outputs on v2. Hard to detect, but measurable.
+
+Here's how to instrument for all four, plus a monitoring layer you can drop into the existing scaffold:Now here's the actual monitoring code to add alongside the existing scaffold:Three new files. Here's the mental model for when each one fires:
+
+**`ModelVersionGuard`** runs at startup only. It computes two fingerprints — one from probe encodings through the tokenizer (catching vocab changes), one from the model's config dict (catching architectural changes like GQA vs MHA or different head counts). If either differs from the last committed run, it wipes all `.safetensors` cache files before the server accepts any traffic. Critically, it fingerprints *actual tokenizer behavior* via probe strings rather than just a version string, because model cards often update the config without bumping a version number.
+
+**`CacheHealthMonitor`** runs continuously. The four signals to watch in order of urgency:
+
+- `mean_divergence` crossing 0.25 is your canary — it means warm-cache outputs are starting to drift from cold-start outputs on the same prompt. This is the earliest possible warning of a cache corruption problem, before users notice anything wrong. The shadow sampler (2% of requests by default) keeps the overhead negligible.
+- `shape_mismatch` invalidations appearing at all is a hard bug — the guard should have caught architecture changes. When this fires it means a model was swapped in a way the fingerprint logic didn't detect (e.g. same config, different weights). Warrants immediate investigation.
+- `hit_rate` dropping below 50% usually means agents are churning through novel prompts faster than the cache is being reused — a workload change, not a bug. But combined with rising `evictions_last_60s` it means `max_ram_slots` needs to go up.
+- `hit_latency_p95` rising while hit rate stays high means Metal memory pressure — another process is competing for GPU memory, or you're spilling to disk so fast the disk round-trip is eating your latency advantage.
+
+The `integration_patch.py` file has a reference table at the bottom mapping each metric to its actionable response. The shape validation hook is the most important thing to actually wire in — it belongs in `CacheRegistry._load_from_disk` right after `mx.load`, before the cache is ever handed to the model.
+"""
+model_version_guard.py — Detects model upgrades and invalidates stale KV caches.
+
+Two fingerprints are computed at startup and stored alongside caches:
+  1. Tokenizer fingerprint — hash of vocab size + special tokens + a set of
+     probe encodings. Catches tokenizer updates that would corrupt token_len offsets.
+  2. Architecture fingerprint — hash of model config dict. Catches head count,
+     layer count, hidden-dim, or attention-type changes that would produce
+     incompatible cache shapes.
+
+If either fingerprint mismatches on load, the cache is invalidated before it
+can poison inference.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from pathlib import Path
+from typing import Optional
+
+log = logging.getLogger(__name__)
+
+# Canonical probe strings — cover punctuation, code tokens, non-ASCII
+_PROBE_STRINGS = [
+    "Hello, world!",
+    "def foo(x: int) -> str:",
+    "SELECT * FROM users WHERE id = 1;",
+    "日本語テスト",
+    "<|system|>\n<|user|>\n<|assistant|>",
+]
+
+
+def _tokenizer_fingerprint(tokenizer) -> str:
+    """
+    Build a stable fingerprint of the tokenizer state.
+    Sensitive to: vocab changes, special token reassignments, chat template edits.
+    """
+    parts = [
+        str(getattr(tokenizer, "vocab_size", "?")),
+        str(getattr(tokenizer, "eos_token_id", "?")),
+        str(getattr(tokenizer, "bos_token_id", "?")),
+        str(getattr(tokenizer, "pad_token_id", "?")),
+    ]
+    # Chat template (if present)
+    tmpl = getattr(tokenizer, "chat_template", None)
+    if tmpl:
+        parts.append(hashlib.md5(tmpl.encode()).hexdigest()[:8])
+
+    # Probe encodings — the real test
+    for probe in _PROBE_STRINGS:
+        try:
+            ids = tokenizer.encode(probe)
+            parts.append(f"{len(ids)}:{ids[0]}:{ids[-1]}")
+        except Exception:
+            parts.append("ERR")
+
+    raw = "|".join(parts)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _architecture_fingerprint(model) -> str:
+    """
+    Fingerprint the model architecture config.
+    Catches: layer count, head count, hidden dim, attention type (GQA vs MHA),
+    sliding window size, context length, quantisation bits.
+    """
+    config = {}
+    # Try to access the model's internal config dict
+    for attr in ("args", "config", "model_config", "params"):
+        obj = getattr(model, attr, None)
+        if obj is not None:
+            if hasattr(obj, "__dict__"):
+                config = {
+                    k: v for k, v in vars(obj).items()
+                    if isinstance(v, (int, float, str, bool, type(None)))
+                }
+            elif isinstance(obj, dict):
+                config = {k: v for k, v in obj.items()
+                          if isinstance(v, (int, float, str, bool, type(None)))}
+            break
+
+    # Fallback: count parameters as a proxy
+    if not config:
+        try:
+            import mlx.core as mx
+            flat = model.parameters()
+            if hasattr(flat, "items"):
+                config["_param_keys"] = sorted(flat.keys())
+        except Exception:
+            pass
+
+    raw = json.dumps(config, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+class ModelVersionGuard:
+    """
+    Persists model fingerprints to disk and checks them on every cache load.
+
+    Usage:
+        guard = ModelVersionGuard(model, tokenizer, cache_dir=Path(".cache/kv"))
+
+        # Before loading a cache from the registry:
+        if not guard.is_cache_valid(agent_id):
+            registry.delete(agent_id)
+            # proceed with cold start
+    """
+
+    def __init__(self, model, tokenizer, cache_dir: Path):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._fingerprint_path = self.cache_dir / "_model_fingerprint.json"
+
+        self.tok_fp = _tokenizer_fingerprint(tokenizer)
+        self.arch_fp = _architecture_fingerprint(model)
+        self._current = {"tokenizer": self.tok_fp, "architecture": self.arch_fp}
+
+        self._stored = self._load_stored()
+        self._check_global_invalidation()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    @property
+    def model_changed(self) -> bool:
+        """True if either fingerprint differs from the last stored run."""
+        if self._stored is None:
+            return False   # first run — nothing to invalidate
+        return (
+            self._stored.get("tokenizer") != self.tok_fp
+            or self._stored.get("architecture") != self.arch_fp
+        )
+
+    @property
+    def tokenizer_changed(self) -> bool:
+        if self._stored is None:
+            return False
+        return self._stored.get("tokenizer") != self.tok_fp
+
+    @property
+    def architecture_changed(self) -> bool:
+        if self._stored is None:
+            return False
+        return self._stored.get("architecture") != self.arch_fp
+
+    def commit(self) -> None:
+        """
+        Call after the server is healthy and all stale caches have been dropped.
+        Writes the current fingerprints as the new baseline.
+        """
+        with open(self._fingerprint_path, "w") as f:
+            json.dump(self._current, f, indent=2)
+        self._stored = self._current.copy()
+        log.info(
+            "Model fingerprints committed: tok=%s arch=%s",
+            self.tok_fp, self.arch_fp,
+        )
+
+    def change_summary(self) -> dict:
+        return {
+            "tokenizer_changed": self.tokenizer_changed,
+            "architecture_changed": self.architecture_changed,
+            "previous": self._stored,
+            "current": self._current,
+        }
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _load_stored(self) -> Optional[dict]:
+        if not self._fingerprint_path.exists():
+            return None
+        try:
+            with open(self._fingerprint_path) as f:
+                return json.load(f)
+        except Exception as exc:
+            log.warning("Could not read fingerprint file: %s", exc)
+            return None
+
+    def _check_global_invalidation(self) -> None:
+        if not self.model_changed:
+            if self._stored is None:
+                log.info("First run — no existing caches to validate.")
+            else:
+                log.info("Model fingerprints match — caches valid.")
+            return
+
+        log.warning(
+            "Model change detected! tok_changed=%s arch_changed=%s",
+            self.tokenizer_changed, self.architecture_changed,
+        )
+        if self.tokenizer_changed:
+            log.warning(
+                "  Tokenizer: %s → %s  (token_len offsets will be wrong!)",
+                self._stored.get("tokenizer"), self.tok_fp,
+            )
+        if self.architecture_changed:
+            log.warning(
+                "  Architecture: %s → %s  (cache shapes may be incompatible!)",
+                self._stored.get("architecture"), self.arch_fp,
+            )
+        # Wipe all on-disk caches — RAM caches are gone anyway on restart
+        stale = list(self.cache_dir.glob("*.safetensors"))
+        for p in stale:
+            p.unlink()
+        log.warning("Deleted %d stale cache files.", len(stale))
+"""
+integration_patch.py — How to wire ModelVersionGuard and CacheHealthMonitor
+into your existing server.py and inference_worker.py.
+
+This file is documentation-as-code. Copy the relevant sections into the
+existing files — it is not meant to be imported directly.
+"""
+
+# =============================================================================
+# PATCH 1: server.py startup — add guard and monitor
+# =============================================================================
+
+# In server.py, modify the startup() function:
+
+async def startup_patched():
+    from model_version_guard import ModelVersionGuard
+    from cache_health_monitor import CacheHealthMonitor
+
+    cfg = app.state.config
+
+    registry = CacheRegistry(
+        max_ram_slots=cfg.max_ram_slots,
+        cache_dir=Path(cfg.cache_dir),
+        max_token_len=cfg.max_token_len,
+    )
+
+    # Load model first so we can fingerprint it
+    from mlx_lm import load
+    model, tokenizer = load(cfg.model)
+
+    # Guard: detects model upgrades and wipes stale caches automatically
+    guard = ModelVersionGuard(model, tokenizer, cache_dir=Path(cfg.cache_dir))
+    if guard.model_changed:
+        print("⚠️  Model change detected:", guard.change_summary())
+        # CacheRegistry already wiped disk caches in ModelVersionGuard.__init__
+    guard.commit()  # accept current fingerprints as baseline
+
+    # Monitor: shadow sampling + threshold alerts
+    def alert_to_structured_log(alert):
+        import json, sys
+        print(json.dumps({
+            "level": alert.level,
+            "category": alert.category,
+            "agent_id": alert.agent_id,
+            "message": alert.message,
+            "value": alert.value,
+            "threshold": alert.threshold,
+        }), file=sys.stderr)
+
+    monitor = CacheHealthMonitor(
+        shadow_rate=cfg.shadow_rate,      # add --shadow-rate CLI arg, default 0.02
+        alert_callback=alert_to_structured_log,
+        thresholds={
+            "hit_rate_warn": cfg.hit_rate_warn,  # add CLI args for key thresholds
+        },
+    )
+
+    # Pass both into the worker
+    global _worker, _model_id
+    _model_id = cfg.model.split("/")[-1]
+    _worker = InferenceWorkerPatched(
+        model=model,
+        tokenizer=tokenizer,
+        registry=registry,
+        monitor=monitor,
+        max_queue_depth=cfg.max_queue_depth,
+    )
+    await _worker.start()
+
+    # Periodic threshold check (every 60s)
+    async def _periodic_check():
+        while True:
+            await asyncio.sleep(60)
+            alerts = monitor.check_thresholds()
+            if alerts:
+                print(f"[monitor] {len(alerts)} active alert(s)")
+
+    asyncio.create_task(_periodic_check())
+
+
+# =============================================================================
+# PATCH 2: /stats endpoint — include health snapshot
+# =============================================================================
+
+# Replace the existing /stats route body:
+async def stats_patched():
+    return {
+        "worker": _worker.stats,
+        "cache": _worker.registry.stats(),
+        "health": _worker.monitor.snapshot(),   # <-- add this
+        "queue_size": _worker._queue.qsize(),
+    }
+
+
+# =============================================================================
+# PATCH 3: inference_worker.py — wire in monitor + shadow checks
+# =============================================================================
+
+# Modify InferenceWorker to accept a monitor and patch _blocking_inference:
+
+def _blocking_inference_patched(self, req):
+    """
+    Drop-in replacement for InferenceWorker._blocking_inference.
+    Adds: shape validation on cache load, shadow divergence checks,
+    and recording to the health monitor.
+    """
+    from cache_health_monitor import CacheHealthMonitor
+    from mlx_lm.models.cache import make_prompt_cache
+    import mlx.core as mx
+
+    t0 = time.monotonic()
+    model = self._model
+    tokenizer = self._tokenizer
+
+    input_ids = tokenizer.encode(req.prompt)
+    prompt_tokens = len(input_ids)
+
+    prev_len = self.registry.token_len(req.agent_id)
+    cache = self.registry.load(req.agent_id, model)
+    cache_hit = cache is not None
+
+    # Shape validation on load
+    if cache_hit:
+        empty = make_prompt_cache(model)
+        ok, err = CacheHealthMonitor.validate_cache_shapes(cache, empty, req.agent_id)
+        if not ok:
+            log.warning("Shape mismatch for %s: %s — cold starting", req.agent_id, err)
+            self.monitor.record_invalidation(req.agent_id, reason="shape_mismatch")
+            cache = empty
+            cache_hit = False
+
+    # Shadow check: run cold copy in parallel for divergence measurement
+    run_shadow = cache_hit and self.monitor.should_shadow_check()
+    warm_output = cold_output = None
+
+    if cache is None or not cache_hit:
+        cache = make_prompt_cache(model)
+
+    # ... (normal prefill + generate, same as before) ...
+    # result_text = (generated text from generate_step)
+    warm_output = "PLACEHOLDER_warm"  # replace with actual generated text
+
+    if run_shadow:
+        # Re-run cold (no cache) on a trimmed prompt to limit cost
+        shadow_cache = make_prompt_cache(model)
+        # shadow_ids = short tail of prompt (last 128 tokens max)
+        shadow_ids = input_ids[-128:]
+        shadow_tensor = mx.array(shadow_ids)[None]
+        _, shadow_cache = model(shadow_tensor, cache=shadow_cache)
+        # generate a short sample (32 tokens) to compare
+        # cold_output = (decoded shadow tokens)
+        cold_output = "PLACEHOLDER_cold"  # replace with actual shadow output
+
+    latency = time.monotonic() - t0
+
+    self.monitor.record(
+        agent_id=req.agent_id,
+        cache_hit=cache_hit,
+        latency_s=latency,
+        completion_tokens=0,  # replace with actual count
+        warm_output=warm_output if run_shadow else None,
+        cold_output=cold_output,
+    )
+    self.monitor.record_eviction(req.agent_id)  # call only when eviction occurs
+
+    # ... save cache back to registry, return InferenceResult ...
+
+
+# =============================================================================
+# PATCH 4: CacheRegistry._spill_to_disk — notify monitor on eviction
+# =============================================================================
+
+# In CacheRegistry._spill_to_disk, after the mx.save_safetensors call,
+# call the monitor if one is attached:
+#
+#   if hasattr(self, '_monitor') and self._monitor:
+#       self._monitor.record_eviction(agent_id)
+#
+# Wire it in __init__:
+#   self._monitor = None   # set externally after construction
+
+
+# =============================================================================
+# PATCH 5: CLI args to add to server.py parse_args()
+# =============================================================================
+
+def parse_args_additions(p):
+    """Additional args to add to the existing argparse setup."""
+    p.add_argument("--shadow-rate", type=float, default=0.02,
+                   help="Fraction of requests to run as shadow cold checks (0..1)")
+    p.add_argument("--hit-rate-warn", type=float, default=0.50,
+                   help="Alert when cache hit rate drops below this")
+    p.add_argument("--alert-cooldown", type=int, default=300,
+                   help="Seconds between repeated alerts for the same category")
+    return p
+
+
+# =============================================================================
+# QUICK REFERENCE: What each metric tells you
+# =============================================================================
+#
+# METRIC                    RISING/DROPPING          WHAT IT MEANS
+# ──────────────────────────────────────────────────────────────────────────
+# hit_rate (per agent)      Dropping                 Agents changing prompts a
+#                                                    lot, or cache being evicted
+#                                                    before reuse. Raise
+#                                                    max_ram_slots or check
+#                                                    agent session lifetimes.
+#
+# invalidation_rate         Spiking                  Model was swapped. Guard
+#                                                    should have wiped caches
+#                                                    but agents are still
+#                                                    submitting stale sessions.
+#
+# mean_divergence           Crossing 0.25            Cached prefix is leading
+#                                                    the model to different
+#                                                    generations than cold.
+#                                                    Could be quantization
+#                                                    difference or architecture
+#                                                    change that guard missed.
+#
+# hit_latency_p95           Rising                   Cache is warm but slow.
+#                                                    Either spilling to disk
+#                                                    (check evictions_last_60s)
+#                                                    or Metal memory pressure
+#                                                    from competing processes.
+#
+# evictions_last_60s        > 10/min                 max_ram_slots too small.
+#                                                    Raise it or add a shared
+#                                                    prefix slot to reduce per-
+#                                                    agent footprint.
+#
+# shape_mismatch            Any occurrence           New model architecture
+#                                                    that guard's config hash
+#                                                    didn't catch. Check guard
+#                                                    fingerprint logic for the
+#                                                    specific model family.
+"""
+cache_health_monitor.py — Runtime stability monitoring for the KV cache proxy.
+
+What it tracks
+--------------
+1. Cache hit / miss rates per agent and globally.
+2. Cache invalidation events and their reasons (shape mismatch, fingerprint
+   change, token overflow, explicit eviction).
+3. Shadow divergence — a configurable fraction of requests are run twice: once
+   with the warm cache, once cold. The outputs are compared and a divergence
+   score is recorded. Rising divergence = model drift or cache corruption.
+4. Latency distributions — p50 / p95 / p99 per agent and split by cache
+   hit vs miss.
+5. Eviction pressure — how often slots are being spilled to disk (sign that
+   max_ram_slots is too low for current workload).
+
+Alerting
+--------
+Thresholds are configurable. When exceeded, alert() is called — wire it to
+your preferred sink (structured log, Prometheus, Slack webhook, etc.).
+
+Usage
+-----
+    monitor = CacheHealthMonitor(shadow_rate=0.02)  # 2% shadow checks
+
+    # In inference_worker._blocking_inference, wrap the result:
+    monitor.record(
+        agent_id=req.agent_id,
+        cache_hit=result.cache_hit,
+        latency_s=result.latency_s,
+        completion_tokens=result.completion_tokens,
+    )
+
+    # On invalidation events:
+    monitor.record_invalidation(agent_id, reason="shape_mismatch")
+
+    # Check for alerts (call periodically or from /stats endpoint):
+    alerts = monitor.check_thresholds()
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import math
+import random
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from typing import Callable, Optional
+
+log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Data structures
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AgentMetrics:
+    agent_id: str
+    hits: int = 0
+    misses: int = 0
+    invalidations: int = 0
+    invalidation_reasons: dict = field(default_factory=lambda: defaultdict(int))
+    # Rolling window of latencies (last 200 requests)
+    hit_latencies:  deque = field(default_factory=lambda: deque(maxlen=200))
+    miss_latencies: deque = field(default_factory=lambda: deque(maxlen=200))
+    # Rolling window of divergence scores (last 50 shadow checks)
+    divergence_scores: deque = field(default_factory=lambda: deque(maxlen=50))
+    total_tokens: int = 0
+    last_seen: float = field(default_factory=time.monotonic)
+
+    @property
+    def hit_rate(self) -> float:
+        total = self.hits + self.misses
+        return self.hits / total if total > 0 else 0.0
+
+    @property
+    def request_count(self) -> int:
+        return self.hits + self.misses
+
+    def latency_percentile(self, p: float, hit: bool) -> Optional[float]:
+        src = self.hit_latencies if hit else self.miss_latencies
+        if not src:
+            return None
+        s = sorted(src)
+        idx = max(0, int(math.ceil(p / 100 * len(s))) - 1)
+        return s[idx]
+
+    def mean_divergence(self) -> Optional[float]:
+        if not self.divergence_scores:
+            return None
+        return sum(self.divergence_scores) / len(self.divergence_scores)
+
+
+@dataclass
+class Alert:
+    level: str          # "warning" | "critical"
+    category: str       # "hit_rate" | "divergence" | "invalidation_rate" | "latency" | "eviction"
+    agent_id: Optional[str]
+    message: str
+    value: float
+    threshold: float
+    ts: float = field(default_factory=time.time)
+
+
+# ---------------------------------------------------------------------------
+# Text similarity (token overlap) for divergence scoring
+# ---------------------------------------------------------------------------
+
+def _jaccard_token_overlap(a: str, b: str) -> float:
+    """
+    Fast proxy for output similarity. Returns 0.0 (identical) .. 1.0 (no overlap).
+    Real production use: embed both and compute cosine distance.
+    """
+    tok_a = set(a.lower().split())
+    tok_b = set(b.lower().split())
+    if not tok_a and not tok_b:
+        return 0.0
+    intersection = len(tok_a & tok_b)
+    union = len(tok_a | tok_b)
+    return 1.0 - (intersection / union if union > 0 else 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Monitor
+# ---------------------------------------------------------------------------
+
+class CacheHealthMonitor:
+    """
+    Collects metrics from the inference worker and surfaces actionable alerts.
+
+    Parameters
+    ----------
+    shadow_rate : float
+        Fraction of requests to duplicate as cold-start shadow checks.
+        0.02 = 2%. Keep low; shadows double inference cost for that request.
+    alert_callback : callable, optional
+        Called with (Alert) whenever a threshold is crossed. Defaults to logging.
+    thresholds : dict, optional
+        Override default alert thresholds (see _DEFAULT_THRESHOLDS).
+    """
+
+    _DEFAULT_THRESHOLDS = {
+        # Hit rate below this triggers a warning (after 20+ requests)
+        "hit_rate_warn": 0.50,
+        "hit_rate_crit": 0.20,
+        # Mean shadow divergence score above this is suspicious
+        # (0 = identical, 1 = completely different vocab)
+        "divergence_warn": 0.25,
+        "divergence_crit": 0.50,
+        # Invalidations per 100 requests
+        "invalidation_rate_warn": 5.0,
+        "invalidation_rate_crit": 15.0,
+        # Cache-hit p95 latency above this (seconds) suggests cache is helping less
+        "hit_latency_p95_warn": 5.0,
+        # Evictions per minute
+        "eviction_rate_warn": 10.0,
+    }
+
+    def __init__(
+        self,
+        shadow_rate: float = 0.02,
+        alert_callback: Optional[Callable[[Alert], None]] = None,
+        thresholds: Optional[dict] = None,
+    ):
+        self.shadow_rate = shadow_rate
+        self.alert_callback = alert_callback or self._default_alert
+        self.thresholds = {**self._DEFAULT_THRESHOLDS, **(thresholds or {})}
+
+        self._agents: dict[str, AgentMetrics] = defaultdict(
+            lambda: AgentMetrics(agent_id="unknown")
+        )
+        # Eviction events: timestamp list (rolling 60s window)
+        self._eviction_times: deque = deque(maxlen=1000)
+        # Global invalidation events
+        self._invalidation_log: deque = deque(maxlen=500)
+        # Fired alerts (dedup window)
+        self._recent_alerts: dict[str, float] = {}
+        self._alert_cooldown_s = 300  # re-fire same alert at most every 5 min
+
+    # ------------------------------------------------------------------
+    # Recording API (call from inference_worker)
+    # ------------------------------------------------------------------
+
+    def record(
+        self,
+        agent_id: str,
+        cache_hit: bool,
+        latency_s: float,
+        completion_tokens: int,
+        warm_output: Optional[str] = None,
+        cold_output: Optional[str] = None,
+    ) -> None:
+        """Record a completed inference request."""
+        m = self._get_agent(agent_id)
+        if cache_hit:
+            m.hits += 1
+            m.hit_latencies.append(latency_s)
+        else:
+            m.misses += 1
+            m.miss_latencies.append(latency_s)
+        m.total_tokens += completion_tokens
+        m.last_seen = time.monotonic()
+
+        # Divergence scoring from shadow comparison
+        if warm_output is not None and cold_output is not None:
+            score = _jaccard_token_overlap(warm_output, cold_output)
+            m.divergence_scores.append(score)
+            if score > self.thresholds["divergence_warn"]:
+                log.warning(
+                    "Shadow divergence for agent %s: %.2f (warm vs cold outputs differ)",
+                    agent_id, score,
+                )
+
+    def record_invalidation(self, agent_id: str, reason: str) -> None:
+        """Record a cache invalidation event."""
+        m = self._get_agent(agent_id)
+        m.invalidations += 1
+        m.invalidation_reasons[reason] += 1
+        self._invalidation_log.append({
+            "agent_id": agent_id,
+            "reason": reason,
+            "ts": time.time(),
+        })
+        log.info("Cache invalidated for %s reason=%s", agent_id, reason)
+
+    def record_eviction(self, agent_id: str) -> None:
+        """Record a RAM→disk eviction (spill)."""
+        self._eviction_times.append(time.monotonic())
+
+    def should_shadow_check(self) -> bool:
+        """Returns True with probability shadow_rate."""
+        return random.random() < self.shadow_rate
+
+    # ------------------------------------------------------------------
+    # Threshold checking (call periodically or from /stats)
+    # ------------------------------------------------------------------
+
+    def check_thresholds(self) -> list[Alert]:
+        alerts = []
+        now = time.monotonic()
+
+        for agent_id, m in self._agents.items():
+            if m.request_count < 20:
+                continue  # not enough data
+
+            # Hit rate
+            hr = m.hit_rate
+            if hr < self.thresholds["hit_rate_crit"]:
+                alerts.append(Alert(
+                    level="critical", category="hit_rate", agent_id=agent_id,
+                    message=f"Cache hit rate critically low for {agent_id}: {hr:.1%}",
+                    value=hr, threshold=self.thresholds["hit_rate_crit"],
+                ))
+            elif hr < self.thresholds["hit_rate_warn"]:
+                alerts.append(Alert(
+                    level="warning", category="hit_rate", agent_id=agent_id,
+                    message=f"Cache hit rate low for {agent_id}: {hr:.1%}",
+                    value=hr, threshold=self.thresholds["hit_rate_warn"],
+                ))
+
+            # Divergence
+            div = m.mean_divergence()
+            if div is not None:
+                if div > self.thresholds["divergence_crit"]:
+                    alerts.append(Alert(
+                        level="critical", category="divergence", agent_id=agent_id,
+                        message=f"High output divergence for {agent_id}: {div:.2f} — possible cache corruption",
+                        value=div, threshold=self.thresholds["divergence_crit"],
+                    ))
+                elif div > self.thresholds["divergence_warn"]:
+                    alerts.append(Alert(
+                        level="warning", category="divergence", agent_id=agent_id,
+                        message=f"Elevated output divergence for {agent_id}: {div:.2f}",
+                        value=div, threshold=self.thresholds["divergence_warn"],
+                    ))
+
+            # Invalidation rate
+            inval_rate = (m.invalidations / m.request_count) * 100
+            if inval_rate > self.thresholds["invalidation_rate_crit"]:
+                alerts.append(Alert(
+                    level="critical", category="invalidation_rate", agent_id=agent_id,
+                    message=f"High invalidation rate for {agent_id}: {inval_rate:.1f}/100 requests",
+                    value=inval_rate, threshold=self.thresholds["invalidation_rate_crit"],
+                ))
+
+            # Hit latency p95 regression
+            p95 = m.latency_percentile(95, hit=True)
+            if p95 is not None and p95 > self.thresholds["hit_latency_p95_warn"]:
+                alerts.append(Alert(
+                    level="warning", category="latency", agent_id=agent_id,
+                    message=f"Cache-hit p95 latency high for {agent_id}: {p95:.1f}s",
+                    value=p95, threshold=self.thresholds["hit_latency_p95_warn"],
+                ))
+
+        # Eviction rate (global, last 60s)
+        cutoff = now - 60
+        recent_evictions = sum(1 for t in self._eviction_times if t > cutoff)
+        if recent_evictions > self.thresholds["eviction_rate_warn"]:
+            alerts.append(Alert(
+                level="warning", category="eviction", agent_id=None,
+                message=f"High eviction rate: {recent_evictions} spills/min — consider increasing max_ram_slots",
+                value=float(recent_evictions), threshold=self.thresholds["eviction_rate_warn"],
+            ))
+
+        # Fire callbacks with dedup
+        for alert in alerts:
+            key = f"{alert.category}:{alert.agent_id}"
+            last_fired = self._recent_alerts.get(key, 0)
+            if now - last_fired > self._alert_cooldown_s:
+                self.alert_callback(alert)
+                self._recent_alerts[key] = now
+
+        return alerts
+
+    # ------------------------------------------------------------------
+    # Snapshot for /stats endpoint
+    # ------------------------------------------------------------------
+
+    def snapshot(self) -> dict:
+        now = time.monotonic()
+        cutoff = now - 60
+        recent_evictions = sum(1 for t in self._eviction_times if t > cutoff)
+
+        agents_out = {}
+        for agent_id, m in self._agents.items():
+            div = m.mean_divergence()
+            agents_out[agent_id] = {
+                "requests": m.request_count,
+                "hit_rate": round(m.hit_rate, 3),
+                "hits": m.hits,
+                "misses": m.misses,
+                "invalidations": m.invalidations,
+                "invalidation_reasons": dict(m.invalidation_reasons),
+                "latency_p50_hit_s":  m.latency_percentile(50, hit=True),
+                "latency_p95_hit_s":  m.latency_percentile(95, hit=True),
+                "latency_p50_miss_s": m.latency_percentile(50, hit=False),
+                "latency_p95_miss_s": m.latency_percentile(95, hit=False),
+                "mean_divergence": round(div, 3) if div is not None else None,
+                "shadow_checks": len(m.divergence_scores),
+                "total_tokens": m.total_tokens,
+            }
+
+        alerts = self.check_thresholds()
+
+        return {
+            "agents": agents_out,
+            "global": {
+                "evictions_last_60s": recent_evictions,
+                "recent_invalidations": list(self._invalidation_log)[-10:],
+            },
+            "active_alerts": [
+                {
+                    "level": a.level,
+                    "category": a.category,
+                    "agent_id": a.agent_id,
+                    "message": a.message,
+                }
+                for a in alerts
+            ],
+        }
+
+    # ------------------------------------------------------------------
+    # Shape validation helper (call in CacheRegistry._load_from_disk)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def validate_cache_shapes(
+        loaded_cache: list,
+        expected_cache: list,
+        agent_id: str,
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Compare loaded cache layer shapes against a freshly-made empty cache.
+        Returns (valid: bool, error_message: str | None).
+
+        Usage:
+            empty = make_prompt_cache(model)
+            ok, err = CacheHealthMonitor.validate_cache_shapes(loaded, empty, agent_id)
+            if not ok:
+                monitor.record_invalidation(agent_id, reason="shape_mismatch")
+                return None  # force cold start
+        """
+        if len(loaded_cache) != len(expected_cache):
+            return False, (
+                f"Layer count mismatch: loaded {len(loaded_cache)} "
+                f"vs expected {len(expected_cache)}"
+            )
+        for i, (l, e) in enumerate(zip(loaded_cache, expected_cache)):
+            import mlx.core as mx
+            l_arr = l if isinstance(l, mx.array) else None
+            e_arr = e if isinstance(e, mx.array) else None
+            if l_arr is not None and e_arr is not None:
+                if l_arr.shape[1:] != e_arr.shape[1:]:   # ignore batch/seq dim
+                    return False, (
+                        f"Layer {i} shape mismatch: "
+                        f"loaded {l_arr.shape} vs expected {e_arr.shape}"
+                    )
+        return True, None
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _get_agent(self, agent_id: str) -> AgentMetrics:
+        if agent_id not in self._agents:
+            self._agents[agent_id] = AgentMetrics(agent_id=agent_id)
+        return self._agents[agent_id]
+
+    @staticmethod
+    def _default_alert(alert: Alert) -> None:
+        lvl = logging.CRITICAL if alert.level == "critical" else logging.WARNING
+        log.log(lvl, "[ALERT %s] %s (value=%.3f threshold=%.3f)",
+                alert.category, alert.message, alert.value, alert.threshold)

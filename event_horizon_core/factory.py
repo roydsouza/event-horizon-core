@@ -3,6 +3,7 @@ from .providers.base import BaseLLMProvider
 from .providers.mlx_provider import MLXProvider
 from .providers.ollama_provider import OllamaProvider
 from .providers.openrouter_provider import OpenRouterProvider
+from .providers.llamacpp_provider import LlamaCppProvider
 
 class LLMFactory:
     """
@@ -12,7 +13,8 @@ class LLMFactory:
     PROVIDERS: Dict[str, Type[BaseLLMProvider]] = {
         "mlx": MLXProvider,
         "ollama": OllamaProvider,
-        "openrouter": OpenRouterProvider
+        "openrouter": OpenRouterProvider,
+        "llamacpp": LlamaCppProvider
     }
 
     @classmethod
