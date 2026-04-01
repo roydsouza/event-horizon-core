@@ -1,5 +1,13 @@
 # Synchronization Log
 
+- **2026-03-31 17:05:00 PDT**: **Streamlining Phase: MLX-Only Substrate Finalized**.
+    - **Optimization**: Decommissioned support for `llama.cpp` and `ollama` in the Go substrate. By focusing exclusively on MLX Metal bindings, we have reduced memory overhead and improved supervisor reliability on the 24GB M5.
+    - **2-Tier Hierarchy**: The system is now a lean 2-Tier model:
+        - **Tier 1 (Local)**: MLX (`mlx_lm.server`).
+        - **Tier 3 (Remote)**: OpenRouter (Claude/Gemini/Llama 3).
+    - **Refactoring**: Updated `cli.py`, `README.md`, and `bench_performance.py` to remove non-MLX references. The benchmarking suite now focuses on native Go-proxied MLX performance vs OpenRouter fallbacks.
+    - **State**: All redundant code and documentation for legacy providers have been purged.
+
 - **2026-03-31 14:00:00 PDT**: **Phase 9: Python Eradication & Final M5 Optimization Complete**.
     - **Thin-Client Refactor**: Overhauled `event_horizon_core/cli.py` to act as a high-speed proxy. It now utilizes the `requests` library to communicate with the Go Daemon on Port 8000, preserving the `uv run event-horizon` workflow while offloading all logic to the Go substrate.
     - **Logic Purge**: Deleted `orchestrator.py`, `factory.py`, and the entire `providers/` directory. All manual VRAM locking, queueing, and fallback logic is now handled natively by Goroutines and blocking Go middleware.

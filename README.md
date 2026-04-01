@@ -8,11 +8,33 @@
 *   **Active Supervision**: Subprocess management with **Anti-Zombie Mutex** (Process Groups) ensures 0 VRAM leaks.
 *   **Dynamic Model Swapping**: Hot-swap MLX models on-the-fly with blocking HTTP middleware (No 502/504 errors).
 *   **Hardware Optimizations**: Native support for **Prefix Caching** (`--prompt-cache-size`) and **Speculative Decoding** (`--draft-model`).
-*   **Tiered Fallback Hierarchy**:
-    1.  **Tier 1 (Local)**: MLX (`mlx_lm.server`)
-    2.  **Tier 2 (Fallback)**: Llama.cpp (`llama-server`)
-    3.  **Tier 3 (Remote)**: OpenRouter (Claude, Gemini, Llama 3)
+*   **2-Tier Fast Proxy**: 
+    1.  **Tier 1 (Local)**: Direct-to-Metal MLX (`mlx_lm.server`).
+    2.  **Tier 3 (Remote)**: OpenRouter (Claude, Gemini, Llama 3).
 *   **macOS Persistence**: Integrated `launchd` service for invisible, self-healing background operation.
+
+## 💸 Zero-Cost Inference (Free & Local-First)
+
+Event Horizon is optimized for a **Zero-Cost Workflow**, prioritizing your local M5 hardware and free remote providers.
+
+### 🏠 Tier 1: Local (24GB M5 Optimized)
+These models run natively on your Metal GPU using MLX. For your 24GB Unified Memory, stay under ~15B parameters for 4-bit quantized models to ensure 100% OS stability.
+
+**Recommended Free Local Models:**
+*   `mlx-community/Llama-3.2-3B-Instruct-4bit` (Ultra-fast, fit for background agents)
+*   `mlx-community/Llama-3.1-8B-Instruct-4bit` (Balanced logic/speed)
+*   `mlx-community/Mistral-7B-Instruct-v0.3-4bit` (Great for function calling)
+
+### ☁️ Tier 3: Free Remote Fallbacks (OpenRouter)
+When you need high intelligence without VRAM/Electricity cost, use these free aliases:
+
+| Label | Target Model (OpenRouter) | Note |
+| :--- | :--- | :--- |
+| **`free`** | `google/gemini-2.0-flash-exp:free` | **Primary Choice.** Unlimited context, multimodal, zero cost. |
+| **`fast`** | `google/gemini-2.0-flash-001` | Extremely fast (small credit usage if exp is busy). |
+
+> [!TIP]
+> Use the **`free`** label for your "grunt work" agents to keep your M5 focused on local inference while leveraging Gemini Flash for zero cost.
 
 ## 🛠 Installation & Setup
 

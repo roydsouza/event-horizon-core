@@ -18,6 +18,24 @@ def main(ctx):
     
     This CLI is now a high-performance thin-client proxying inference 
     to the background Go Daemon on Port 8000.
+    
+    💰 ZERO-COST WORKFLOW:
+      Tier 1 (Local):  Run free models natively on your M5 (24GB VRAM). 
+                       Recommended: Llama-3.2-3B, Llama-3.1-8B.
+                       Constraint: Stay <15B params for 100% OS stability.
+      Tier 3 (Free):   Use Gemini 2.0 Flash (Experimental) for zero-cost remote.
+                       Alias: 'free'
+
+    MODEL ALIASES (Tier 3):
+      free:      Gemini 2.0 Flash (Zero-Cost / Experimental)
+      fast:      Gemini 2.0 Flash (High-Speed / Low-Cost)
+      best:      Claude 3.5 Sonnet (Logic/Coding)
+      cheap:     Llama 3.3 70b (Reasoning)
+      reasoner:  OpenAI o1-preview (Deep Thinking)
+      
+    HIERARCHY:
+      Tier 1 (Local):  Direct-to-Metal MLX models.
+      Tier 3 (Remote): OpenRouter-backed providers (Claude, Gemini, etc.).
     """
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())

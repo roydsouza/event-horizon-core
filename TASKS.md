@@ -54,23 +54,13 @@
 - [x] **Extended Capabilities [PHASE 5.2]**:
     - [x] **OpenRouter Model Shorthand**: Implement aliasing.
     - [x] Performance benchmark script (tok/s logger).
-- [x] **Native Llama.cpp Integration [PHASE 5.3]**:
-    - [x] Install Homebrew `llama.cpp` for native M5 Metal optimization.
-    - [x] Implement `LlamaCppProvider` (Tier 2 fallback).
-    - [x] Update Orchestrator and CLI to route to `llamacpp` on port 8081.
-- [x] **Active Fallback Testing**:
-    - [x] Get Llama.cpp up and running.
-    - [x] Verify `uv run event-horizon llamacpp` successfully lists the model.
-    - [x] Test Fallback: Saturated/timeout the MLX server verified.
-- [x] **Next Capabilities [PHASE 5.4]**:
-    - [x] Vision support (Gemma 3).
-    - [x] Local RAG integration stub.
-    - [x] Mobile/Edge deployment validation.
+- [x] **Native Llama.cpp & Ollama (DECOMISSIONED)**:
+    - [x] Logic removed in Streamlining Phase to focus on pure MLX performance.
 
-## Phase 6: Substrate Optimization (Resolved)
-- [x] **Pivot from Ollama to Llama.cpp**:
-    - [x] Legacy: Ollama retained as Tier 4 backup.
-    - [x] Re-evaluated `llama.cpp` vs Ollama. `llama.cpp` provides direct C++/Metal execution without the Go abstraction. This pivot is fully migrated in Phase 5.3.
+## Phase 6: Substrate Streamlining (MLX-Only) [COMPLETE]
+- [x] **Pivot to Pure MLX**:
+    - [x] Removed Tier 2 (Llama.cpp) and Tier 4 (Ollama) from Go substrate.
+    - [x] Optimized for 24GB M5 VRAM by specializing on MLX native Metal bindings.
 
 ## Phase 7: Go Substrate Migration & Advanced Optimization [COMPLETE]
 > <gemini_action_item: flash_model> **FLASH INSTRUCTIONS**: Initialize a `go.mod` project. Use *only* the `net/http` standard library for routing. Do not use external web frameworks. Follow the exact specs below.

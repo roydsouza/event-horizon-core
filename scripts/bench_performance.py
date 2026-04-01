@@ -1,90 +1,76 @@
 import asyncio
 import time
-import csv
-import os
+import requests
+import json
 import argparse
 from datetime import datetime
-from event_horizon_core.factory import LLMFactory
-from event_horizon_core.orchestrator import Orchestrator, LocalInferenceQueue
 
-# Configure Orchestrator
-ORCHESTRATOR = Orchestrator(LocalInferenceQueue(max_concurrent=1))
-
+# EH Core Performance Benchmarker (Streamlined for MLX & OpenRouter)
 BENCHMARK_PROMPT = "Write a 100-word story about a robot discovering a soul."
-CSV_FILE = "benchmarks.csv"
+BASE_URL = "http://127.0.0.1:8000"
 
-async def run_benchmark(provider_name: str, model: str = None):
-    print(f"[*] Benchmarking {provider_name.upper()}...")
+async def run_benchmark(model: str):
+    print(f"[*] Benchmarking Model: {model}...")
     
-    kwargs = {"max_tokens": 300}
-    if model:
-        if provider_name == "mlx":
-            kwargs["model_path"] = model
-        else:
-            kwargs["model"] = model
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": BENCHMARK_PROMPT}],
+        "max_tokens": 100,
+        "temperature": 0.7
+    }
 
     try:
-        engine = LLMFactory.get_provider(provider_name, **kwargs)
-        if not engine.is_healthy():
-            print(f"[!] {provider_name} is unhealthy/offline. Skipping.")
-            return None
-
-        # Measure
         start_time = time.time()
-        response = await ORCHESTRATOR.generate_with_fallback(engine, BENCHMARK_PROMPT)
+        resp = requests.post(f"{BASE_URL}/v1/chat/completions", json=payload, timeout=300)
+        resp.raise_for_status()
         total_time = time.time() - start_time
         
-        usage = response.usage
-        tps = usage.tokens_per_second
+        data = resp.json()
+        usage = data.get("usage", {})
+        total_tokens = usage.get("total_tokens", 0)
+        tps = total_tokens / total_time if total_time > 0 else 0
         
-        print(f"    [+] Model: {response.model}")
-        print(f"    [+] Tokens: {usage.total_tokens}")
-        print(f"    [+] Speed: {tps:.2f} tok/s")
-        print(f"    [+] Latency: {usage.generation_time:.2f}s")
+        print(f"    [+] Response Received.")
+        print(f"    [+] Tokens: {total_tokens}")
+        print(f"    [+] total_time: {total_time:.2f}s")
+        print(f"    [+] Speed: {tps:.2f} tok/s (End-to-End)")
         
         return {
             "timestamp": datetime.now().isoformat(),
-            "provider": provider_name,
-            "model": response.model,
-            "tokens": usage.total_tokens,
-            "latency": f"{usage.generation_time:.4f}",
+            "model": model,
+            "tokens": total_tokens,
+            "latency": f"{total_time:.4f}",
             "tps": f"{tps:.2f}"
         }
     except Exception as e:
-        print(f"    [!] Error benchmarking {provider_name}: {e}")
+        print(f"    [!] Error benchmarking {model}: {e}")
         return None
-
-def save_results(results):
-    file_exists = os.path.isfile(CSV_FILE)
-    with open(CSV_FILE, mode='a', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=["timestamp", "provider", "model", "tokens", "latency", "tps"])
-        if not file_exists:
-            writer.writeheader()
-        for r in results:
-            if r:
-                writer.writerow(r)
-    print(f"\n[!] Results saved to {CSV_FILE}")
 
 async def main():
     parser = argparse.ArgumentParser(description="EH Core Performance Benchmarker")
-    parser.add_argument("--provider", help="Specific provider to benchmark (mlx, ollama, openrouter)")
-    parser.add_argument("--all", action="store_true", help="Benchmark all healthy providers")
+    parser.add_argument("--model", help="Specific model to benchmark (Local Path or Alias)")
+    parser.add_argument("--all", action="store_true", help="Benchmark default suite")
     args = parser.parse_args()
 
     results = []
     if args.all:
-        for p in ["mlx", "llamacpp", "ollama", "openrouter"]:
-            res = await run_benchmark(p)
+        # Default representative suite
+        models = ["mlx-community/Llama-3.2-1B-Instruct-4bit", "free", "best"]
+        for m in models:
+            res = await run_benchmark(m)
             results.append(res)
-    elif args.provider:
-        res = await run_benchmark(args.provider)
+    elif args.model:
+        res = await run_benchmark(args.model)
         results.append(res)
     else:
-        # Default to MLX
-        res = await run_benchmark("mlx")
+        # Default to Current MLX
+        res = await run_benchmark("default")
         results.append(res)
 
-    save_results([r for r in results if r])
+    print("\n--- Summary ---")
+    for r in results:
+        if r:
+            print(f"Model: {r['model']} | Speed: {r['tps']} tok/s | Latency: {r['latency']}s")
 
 if __name__ == "__main__":
     asyncio.run(main())
