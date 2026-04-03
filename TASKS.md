@@ -93,9 +93,61 @@
 - [x] **Latency Benchmark**: Time-To-First-Token (TTFT) through the Go Proxy must not exceed +50ms over a direct request to the underlying `mlx_lm.server`.
 
 ## Phase 9: Python Eradication & Code Cleanup [COMPLETE]
-> <gemini_action_item: flash_model> **FLASH INSTRUCTIONS**: When Phases 7 and 8 are fully green and verified, systematically perform this cleanup safely.
 - [x] Delete `event_horizon_core/orchestrator.py`.
 - [x] Delete all provider implementations `event_horizon_core/providers/*.py`.
 - [x] Strip `pyproject.toml` and `uv.lock` of any dependencies no longer needed by the core (e.g., `httpx`), retaining only what is needed for `mlx-lm` installation.
 - [x] Remove `main.py` entrypoints if applicable and officially transition the repository root to the Go structure.
 - [x] Close out `TASKS.md` Phase 9 as Complete.
+
+## Phase 10: Local-Only Simplification (Minimal Attack Surface) [COMPLETE]
+- [x] **Pare everything down to MLX Local only**:
+    - [x] Remove `OpenRouter` client and routing from `internal/server/handler.go`.
+    - [x] Delete `internal/providers/openrouter.go`.
+    - [x] Clean up CLI documentation in `event_horizon_core/cli.py`.
+    - [x] Update `README.md` and `MODELS.md` to reflect local-only architecture.
+    - [x] Remove `OPENROUTER_API_KEY` from environment templates and Go logic.
+
+## Future Roadmap: Remote Frills & Orchestrated Reviews
+- [ ] **Re-integrate OpenRouter for Unified Interop**:
+    - [ ] Implement remote engine as a secondary tier (remote/best, remote/fast).
+    - [ ] Develop "Seamless Fallback": Automatically route to remote providers when local VRAM is saturated or M5 thermal throttles.
+- [ ] **Multi-Agent Review Cycles**:
+    - [ ] Local model acts as primary author; reaches out to remote models (Claude/Gemini) for critical reviews, arguments, and counter-points.
+    - [ ] Unified interface for comparing local MLX output with remote reasoning models.
+- [ ] **Advanced Concurrency & KV Caching**:
+    - [ ] Implement the [Concurrency Architecture](file:///Users/rds/antigravity/event-horizon-core/docs/research/concurrency_architecture.md) blueprint for multi-agent VRAM efficiency.
+    - [ ] Leverage [M5 Model Benchmarks](file:///Users/rds/antigravity/event-horizon-core/docs/research/model_benchmarks_m5.md) to optimize local-only agentic performance.
+
+## Phase 11: Hardware Performance & SLO Verification [COMPLETE]
+- [x] **New Performance Suite**: 
+    - [x] Create `tests/hardware_benchmark.py` (Async TTL/TPS Metrics).
+    - [x] Delete legacy `tests/test_torture.py`.
+- [x] **Stress Test Calibration**:
+    - [x] Run 10-client concurrency benchmarks on M5 Silicon. (Result: 0.74s P95 TTFT).
+    - [x] Measure Model Swap latency (Hot-Swap) between 3B and 1B models. (Result: 1.93s Max).
+- [x] **Service Level Objectives (SLOs)**:
+    - [x] Establish "Operational Guardrails" section in `README.md`.
+    - [x] Document P95 TTFT and TPS targets for hardware-native inference.
+
+## Phase 12: LLM Candidate Evaluation [IN PROGRESS]
+- [x] **Decode & Normalize Candidates**:
+    - [x] Map fictitious 2026 models from `GUIDANCE.md` to the closest existing high-performance MLX model repos (see `tests/benchmark_candidates.py` CANDIDATES dict).
+    - Mapped 5 candidates: Qwen2.5-Coder-32B, Qwen2.5-32B, Hermes-3-8B, Gemma-2-27B, Mistral-Nemo-12B.
+- [x] **Download & Exercise Base Images**:
+    - [x] Pre-fetch quantized weights for all 5 models (via `huggingface_hub.snapshot_download`).
+    - [x] Verify basic completions against standard prompts — 3/5 succeeded, 2/5 failed (Gemma crashed, Mistral 503).
+- [x] **Load & Swap Testing**:
+    - [x] Run 5-client concurrency thresholds against all candidates.
+    - [x] Perform hot-swap baseline across multi-GB model loads.
+    - Results: Only Hermes-3-8B-4bit viable (27.9 single TPS, 14.1 under 5-client pressure). All 32B/27B models deadlocked under concurrent load.
+- [ ] **System Load Profiling**:
+    - [ ] Configure `asitop` across 5-client concurrency windows to monitor true memory/bus load for surviving candidates.
+- [ ] **Data Finalization**:
+    - [ ] Aggregate complete findings into `docs/research/llm_candidate_results.md` (currently has 3/5 models; add Gemma-2-27B and Mistral results).
+    - [ ] Include TPS and TTFT distributions with hardware monitoring data.
+
+### Phase 12 Key Finding
+> **On 24GB M5, multi-agent workloads are strictly limited to the 8B parameter tier.** 32B models fit in VRAM but KV cache expansion under 5-client load breaches the 22GB guard, causing 0.0 TPS deadlock. The **Hermes-3-Llama-3.1-8B-4bit** is the only tested model that maintains double-digit TPS under pressure.
+
+## Maintenance: Go Binary Rebuild Needed
+- [ ] **Stale `/status` response**: Go daemon returns `"openrouter":true` in JSON despite OpenRouter removal in Phase 10. Rebuild the `event-horizon` binary from current source.
