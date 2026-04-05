@@ -2,21 +2,19 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/roydsouza/event-horizon-core/internal/providers"
 	"github.com/roydsouza/event-horizon-core/internal/supervisor"
 )
 
 type EventHorizonServer struct {
 	supervisor *supervisor.ProcessManager
-	openRouter *providers.OpenRouterClient
 	port       int
 	mux        *http.ServeMux
 }
@@ -24,7 +22,6 @@ type EventHorizonServer struct {
 func NewEventHorizonServer(pm *supervisor.ProcessManager, port int) *EventHorizonServer {
 	s := &EventHorizonServer{
 		supervisor: pm,
-		openRouter: providers.NewOpenRouterClient(),
 		port:       port,
 		mux:        http.NewServeMux(),
 	}
@@ -45,10 +42,9 @@ func (s *EventHorizonServer) HandleStatus(w http.ResponseWriter, r *http.Request
 	status := s.supervisor.GetStatus()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":     status,
-		"port":       s.port,
-		"engine":     "mlx_lm.server",
-		"openrouter": s.openRouter.APIKey != "",
+		"status": status,
+		"port":   s.port,
+		"engine": "mlx_lm.server",
 	})
 }
 
@@ -70,39 +66,14 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 	}
 	json.Unmarshal(body, &req)
 
-	// Routing Logic:
-	// 1. If model is an alias (e.g. "best", "fast") OR explicitly remote (e.g. "anthropic/"), use OpenRouter (Tier 3)
-	// 2. Otherwise, assume local MLX (Tier 1) and trigger hot-swap if mismatch.
-	isRemote := false
-	if _, ok := providers.Aliases[strings.ToLower(req.Model)]; ok {
-		isRemote = true
-	} else if strings.Contains(req.Model, "/") && !strings.HasPrefix(req.Model, "mlx-community/") {
-		// Heuristic: model with "/" that isn't a community MLX model is likely remote (e.g. anthropic/claude)
-		isRemote = true
-	}
+	// Routing Logic: Assume local MLX (Tier 1) and trigger hot-swap if mismatch.
 
-	if isRemote {
-		log.Printf("[Server] Routing to OpenRouter: %s", req.Model)
-		respBody, headers, statusCode, err := s.openRouter.ProxyRequest(r.Context(), body)
-		if err != nil {
-			log.Printf("[Server] OpenRouter error: %v", err)
-			http.Error(w, fmt.Sprintf("OpenRouter Proxy Error: %v", err), http.StatusServiceUnavailable)
-			return
-		}
-		defer respBody.Close()
-
-		for k, v := range headers {
-			w.Header()[k] = v
-		}
-		w.WriteHeader(statusCode)
-		io.Copy(w, respBody)
-		return
-	}
-
-	// Check if we need to hot-swap local MLX
+	// Check if we need to hot-swap local MLX.
+	// Use context.Background() so the swap is not cancelled if the HTTP client
+	// disconnects or times out mid-load — a cancelled swap leaves mlx_lm.server dead.
 	if req.Model != "" && req.Model != s.supervisor.CurrentModel() && req.Model != "default" {
 		log.Printf("[Server] Client requested model %s, but %s is currently loaded. Initiating Hot-Swap...", req.Model, s.supervisor.CurrentModel())
-		if err := s.supervisor.SwitchModel(r.Context(), req.Model); err != nil {
+		if err := s.supervisor.SwitchModel(context.Background(), req.Model); err != nil {
 			log.Printf("[Server] Hot-Swap Failed: %v", err)
 			http.Error(w, fmt.Sprintf("Failed to load model %s: %v", req.Model, err), http.StatusInternalServerError)
 			return

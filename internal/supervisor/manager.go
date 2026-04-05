@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"sync"
@@ -103,14 +103,16 @@ func (pm *ProcessManager) Start(ctx context.Context) error {
 }
 
 func (pm *ProcessManager) WaitUntilHealthy(ctx context.Context) error {
-	addr := fmt.Sprintf("127.0.0.1:%d", pm.port)
-	log.Printf("[Supervisor] Waiting for port %s to become healthy...", addr)
-	
-	ticker := time.NewTicker(200 * time.Millisecond)
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", pm.port)
+	log.Printf("[Supervisor] Waiting for HTTP health on %s...", healthURL)
+
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
+
+	client := &http.Client{Timeout: 400 * time.Millisecond}
 
 	for {
 		select {
@@ -118,14 +120,15 @@ func (pm *ProcessManager) WaitUntilHealthy(ctx context.Context) error {
 			pm.mu.Lock()
 			pm.status = StatusError
 			pm.mu.Unlock()
-			return fmt.Errorf("timeout waiting for server health on %s", addr)
+			return fmt.Errorf("timeout waiting for server health on %s", healthURL)
 		case <-ticker.C:
-			// Simple TCP check to see if the server is listening
-			conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+			resp, err := client.Get(healthURL)
 			if err == nil {
-				conn.Close()
-				log.Printf("[Supervisor] Server is healthy on port %d", pm.port)
-				return nil
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					log.Printf("[Supervisor] Server is healthy on port %d", pm.port)
+					return nil
+				}
 			}
 		}
 	}
