@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -21,6 +22,8 @@ const (
 )
 
 type ProcessManager struct {
+	swapMu     sync.Mutex   // serializes hot-swaps; one swap at a time
+	mu         sync.RWMutex // protects modelPath and status field reads/writes
 	cmd        *exec.Cmd
 	modelPath  string
 	port       int
@@ -36,17 +39,18 @@ func NewProcessManager(modelPath string, port int) *ProcessManager {
 	}
 }
 
-func (pm *ProcessManager) CurrentModel() string {
-	return pm.modelPath
-}
-
 func (pm *ProcessManager) Start(ctx context.Context) error {
+	pm.mu.Lock()
 	if pm.status == StatusRunning || pm.status == StatusStarting {
-		return fmt.Errorf("server is already %s", pm.status)
+		s := pm.status
+		pm.mu.Unlock()
+		return fmt.Errorf("server is already %s", s)
 	}
-
 	pm.status = StatusStarting
-	log.Printf("[Supervisor] Starting MLX server for model: %s on port %d", pm.modelPath, pm.port)
+	model := pm.modelPath
+	pm.mu.Unlock()
+
+	log.Printf("[Supervisor] Starting MLX server for model: %s on port %d", model, pm.port)
 
 	// Create command: uv run mlx_lm.server --model <model> --port <port>
 	// Advanced optimization: Injects --prompt-cache-size and --max-tokens to optimize Metal on M5
@@ -70,14 +74,18 @@ func (pm *ProcessManager) Start(ctx context.Context) error {
 	pm.cmd.Stderr = os.Stderr
 
 	if err := pm.cmd.Start(); err != nil {
+		pm.mu.Lock()
 		pm.status = StatusError
+		pm.mu.Unlock()
 		return fmt.Errorf("failed to start mlx_lm.server: %w", err)
 	}
 
 	// Wait for process in a goroutine
 	go func() {
 		err := pm.cmd.Wait()
+		pm.mu.Lock()
 		pm.status = StatusStopped
+		pm.mu.Unlock()
 		if err != nil {
 			log.Printf("[Supervisor] Server process exited with error: %v", err)
 		} else {
@@ -85,7 +93,13 @@ func (pm *ProcessManager) Start(ctx context.Context) error {
 		}
 	}()
 
-	return pm.WaitUntilHealthy(ctx)
+	err := pm.WaitUntilHealthy(ctx)
+	if err == nil {
+		pm.mu.Lock()
+		pm.status = StatusRunning
+		pm.mu.Unlock()
+	}
+	return err
 }
 
 func (pm *ProcessManager) WaitUntilHealthy(ctx context.Context) error {
@@ -101,14 +115,15 @@ func (pm *ProcessManager) WaitUntilHealthy(ctx context.Context) error {
 	for {
 		select {
 		case <-timeoutCtx.Done():
+			pm.mu.Lock()
 			pm.status = StatusError
+			pm.mu.Unlock()
 			return fmt.Errorf("timeout waiting for server health on %s", addr)
 		case <-ticker.C:
 			// Simple TCP check to see if the server is listening
 			conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 			if err == nil {
 				conn.Close()
-				pm.status = StatusRunning
 				log.Printf("[Supervisor] Server is healthy on port %d", pm.port)
 				return nil
 			}
@@ -117,13 +132,29 @@ func (pm *ProcessManager) WaitUntilHealthy(ctx context.Context) error {
 }
 
 func (pm *ProcessManager) SwitchModel(ctx context.Context, newModelPath string) error {
-	log.Printf("[Supervisor] Hot-Swapping Model: %s -> %s", pm.modelPath, newModelPath)
-	
+	pm.swapMu.Lock()
+	defer pm.swapMu.Unlock()
+
+	// Re-check inside the lock: another goroutine may have already swapped to this model
+	// while we were waiting to acquire swapMu.
+	pm.mu.RLock()
+	current := pm.modelPath
+	pm.mu.RUnlock()
+	if current == newModelPath {
+		log.Printf("[Supervisor] Model %s already loaded, skipping redundant swap", newModelPath)
+		return nil
+	}
+
+	log.Printf("[Supervisor] Hot-Swapping Model: %s -> %s", current, newModelPath)
+
 	if err := pm.Stop(); err != nil {
 		return fmt.Errorf("failed to stop old model: %w", err)
 	}
 
+	pm.mu.Lock()
 	pm.modelPath = newModelPath
+	pm.mu.Unlock()
+
 	return pm.Start(ctx)
 }
 
@@ -133,17 +164,27 @@ func (pm *ProcessManager) Stop() error {
 	}
 
 	log.Printf("[Supervisor] Stopping server process group...")
-	
+
 	// Send SIGKILL to the entire process group (negative PID)
 	err := syscall.Kill(-pm.cmd.Process.Pid, syscall.SIGKILL)
 	if err != nil {
 		return fmt.Errorf("failed to kill process group: %w", err)
 	}
 
+	pm.mu.Lock()
 	pm.status = StatusStopped
+	pm.mu.Unlock()
 	return nil
 }
 
+func (pm *ProcessManager) CurrentModel() string {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.modelPath
+}
+
 func (pm *ProcessManager) GetStatus() ServerStatus {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
 	return pm.status
 }
