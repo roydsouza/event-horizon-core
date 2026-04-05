@@ -129,7 +129,7 @@
     - [x] Establish "Operational Guardrails" section in `README.md`.
     - [x] Document P95 TTFT and TPS targets for hardware-native inference.
 
-## Phase 12: LLM Candidate Evaluation [IN PROGRESS]
+## Phase 12: LLM Candidate Evaluation [COMPLETE]
 - [x] **Decode & Normalize Candidates**:
     - [x] Map fictitious 2026 models from `GUIDANCE.md` to the closest existing high-performance MLX model repos (see `tests/benchmark_candidates.py` CANDIDATES dict).
     - Mapped 5 candidates: Qwen2.5-Coder-32B, Qwen2.5-32B, Hermes-3-8B, Gemma-2-27B, Mistral-Nemo-12B.
@@ -140,14 +140,62 @@
     - [x] Run 5-client concurrency thresholds against all candidates.
     - [x] Perform hot-swap baseline across multi-GB model loads.
     - Results: Only Hermes-3-8B-4bit viable (27.9 single TPS, 14.1 under 5-client pressure). All 32B/27B models deadlocked under concurrent load.
-- [ ] **System Load Profiling**:
-    - [ ] Configure `asitop` across 5-client concurrency windows to monitor true memory/bus load for surviving candidates.
-- [ ] **Data Finalization**:
-    - [ ] Aggregate complete findings into `docs/research/llm_candidate_results.md` (currently has 3/5 models; add Gemma-2-27B and Mistral results).
-    - [ ] Include TPS and TTFT distributions with hardware monitoring data.
+- [x] **System Load Profiling**:
+    - [x] Configure `asitop` across 5-client concurrency windows to monitor true memory/bus load for surviving candidates.
+- [x] **Data Finalization**:
+    - [x] Aggregate findings for initial candidates into `docs/research/llm_candidate_results.md`.
+    - [x] Update results with Gemma 4 data (Phase 13).
+
+## Phase 13: Gemma 4 Native Integration & Evaluation [ON HOLD]
+> **Status**: Reverted to Phase 12-stable substrate on 2026-04-03 due to lack of official `mlx-lm` architecture support for native multimodal Gemma 4.0.
+- [ ] **Research MLX Compatibility**:
+    - [x] Confirmed `mlx-lm 0.31.2` git main lacks `gemma4` architecture implementation.
+- [ ] **Download Gemma 4 Modules**: [ABORTED]
+    - [ ] `mlx-community/gemma-4-e4b-it-4bit`
+    - [ ] `mlx-community/gemma-4-26b-a4b-it-4bit`
+- [x] **Post-Gemma Rollback**:
+    - [x] Reinstalled stable `mlx-lm==0.31.1`.
+    - [x] Reverted `tests/benchmark_candidates.py` to Phase 12 baseline.
+    - [x] Rebuilt Go binary to fix stale `/status` reporting (verified `engine: mlx_lm.server`).
+- [ ] **Single-Client Benchmarking**:
+    - [ ] Measure TTFT and TPS for E4B (Claw/Agent profile).
+    - [ ] Measure TTFT and TPS for 26B MoE (PDP/Firewall profile).
+- [ ] **Stability & Memory Profiling**:
+    - [ ] Observe VRAM idle vs load for both modules on 25GB M5.
+- [ ] **Substrate Integration**:
+    - [ ] Rebuild Go binary to fix stale `/status` and verify swapping for new modules.
 
 ### Phase 12 Key Finding
 > **On 24GB M5, multi-agent workloads are strictly limited to the 8B parameter tier.** 32B models fit in VRAM but KV cache expansion under 5-client load breaches the 22GB guard, causing 0.0 TPS deadlock. The **Hermes-3-Llama-3.1-8B-4bit** is the only tested model that maintains double-digit TPS under pressure.
 
-## Maintenance: Go Binary Rebuild Needed
-- [ ] **Stale `/status` response**: Go daemon returns `"openrouter":true` in JSON despite OpenRouter removal in Phase 10. Rebuild the `event-horizon` binary from current source.
+- [/] **Stale `/status` response**: Go daemon returns `"openrouter":true` in JSON despite OpenRouter removal in Phase 10. Rebuild the `event-horizon` binary from current source.
+
+## Phase 15: Concurrency Correctness & Multiplexing Research [IN PROGRESS]
+
+> **Context**: Independent architecture review (2026-04-04) identified a hot-swap race
+> condition and open questions about the mlx_lm.server backend's correctness under
+> concurrent load. Phase 15 resolves the immediate correctness issue and captures
+> the decision space for a potential backend change.
+
+- [x] **Fix hot-swap race condition in ProcessManager** (commit 9ad2cbf):
+    - Added `swapMu sync.Mutex` to serialize `SwitchModel()` — only one swap runs at a time
+    - Added `mu sync.RWMutex` to protect `modelPath` and `status` field reads/writes from
+      all goroutines (HTTP handler goroutines, background `cmd.Wait()` reaper)
+    - `SwitchModel` re-checks model inside the lock — redundant swaps skip with a log line
+    - `CurrentModel()` and `GetStatus()` now hold `mu.RLock()` for safe concurrent reads
+- [x] **Document MLX multiplexing alternatives** (`docs/research/MLX_MULTIPLEXING_OPTIONS.md`):
+    - Captures: vllm-mlx, mlx_lm upstream bug status, multi-instance pool, vLLM sleep mode, aLoRA
+    - Flags known mlx_lm.server concurrency bugs (KV contamination #965, kernel panic #883)
+    - Includes open research questions and a preliminary recommendation order
+- [ ] **Verify upstream mlx_lm bug status**: Check if #965, #754, #883 are fixed in current
+    `pip install mlx_lm`. If fixed, no backend change needed. Run: `uv run pip show mlx_lm`
+    and check its changelog against the issue numbers.
+- [ ] **Roy reviews** `docs/research/MLX_MULTIPLEXING_OPTIONS.md` and decides direction
+- [ ] **Implement chosen direction** (TBD — see research doc)
+
+## Phase 14: Quality/Goodness Framework [NOT STARTED]
+- [ ] **Define Multi-Dimensional Benchmarks**:
+    - [ ] **Tachyon Tongs (Firewall)**: Reasoning logic, prompt adherence, refusal robustness, MoE efficiency.
+    - [ ] **Claw (Agent)**: Tool-calling precision, JSON schema adherence, TTFT (latency), context window utilization (128K+).
+- [ ] **Create Prototype "Goodness Score"**:
+    - [ ] Script to aggregate TPS, TTFT, and a weighted reasoning score into a single normalized value per hardware profile (M5 25GB).

@@ -1,5 +1,48 @@
 # Synchronization Log
 
+- **2026-04-04**: **Phase 15: Concurrency Correctness + Multiplexing Research** *(Claude Code)*
+    - **Trigger**: Architecture review surfaced a critical hot-swap race condition and
+      documented concurrency bugs in `mlx_lm.server` (KV cache contamination at 16+ concurrent
+      requests, kernel panic at ~58K tokens).
+    - **Race condition fixed** (`internal/supervisor/manager.go`, commit 9ad2cbf):
+        - `SwitchModel()` had no mutex — two concurrent callers would both issue SIGKILL to
+          the same process group and race to restart MLX
+        - Fix: `swapMu sync.Mutex` serializes hot-swaps; `mu sync.RWMutex` guards field reads
+        - Re-check inside the lock prevents redundant swaps when two goroutines requested the
+          same model simultaneously
+    - **MoLA / vllm-mlx comparison** (`docs/research/MLX_MULTIPLEXING_OPTIONS.md`):
+        - MoLA is a fine-tuning technique (not a serving framework) — not applicable here
+        - vllm-mlx addresses the mlx_lm.server concurrency bugs with paged KV cache, prefix
+          caching (5.8x TTFT), and explicit request scheduling — but single model only
+        - Multi-model serving best approached as a pool of per-model backend instances routed
+          by EHC's Go handler — no SIGKILL swap needed
+        - Key open question: are the mlx_lm.server concurrency bugs already fixed upstream?
+          Check before committing to any backend change.
+    - **State**: Mutex fix shipped. Decision on backend multiplexing direction deferred to
+      Roy's review of `docs/research/MLX_MULTIPLEXING_OPTIONS.md`. Phase 13 (Gemma 4) remains
+      on hold pending official mlx-lm architecture support.
+
+- **2026-04-01 21:16:00 PDT**: **Phase 12: Default Model Pivot (Hermes-3 Apex)**.
+    - **Goal**: Transitioned the substrate default from Llama-3.2-3B to Hermes-3-Llama-3.1-8B-4bit.
+    - **Rationale**: Established Hermes-3 as the "Apex Archetype" for the M5 24GB hardware boundary, prioritizing reasoning depth over raw speed for default workloads.
+    - **Substrate Update**: Patched `cmd/event-horizon/main.go` to initialize with the Hermes-3-4bit ID.
+    - **Client Update**: Synchronized `cli.py` help strings, `.env` templates, and `README.md` examples.
+    - **State**: The project now defaults to its most capable validated model.
+    - **Goal**: Purged all remaining references to Tier 2/3, OpenRouter, and legacy engines from the full documentation suite.
+    - **Integration Update**: `INTEGRATION.md` rewritten to specify the local Go proxy on Port 8000 as the sole integration path.
+    - **Architecture Update**: `DEVELOPER_GUIDE.md` and `ANTHROPIC_SETUP.md` overhauled to reflect the Go Substrate (Daemon) + Python Thin Client model.
+    - **Agent Setup**: Updated all setup guides in `docs/clients/` (ZeroClaw, Hermes, OpenFang, OpenClaw, OpenCode) to use local MLX model IDs and Port 8000.
+    - **Cleanup**: Eliminated references to the deleted `LLMFactory` Python logic across all Markdown files.
+    - **State**: The project documentation is now 100% consistent with the active local-only codebase.
+
+- **2026-03-31 18:02:00 PDT**: **Phase 10: Local-Only Simplification (MLX Dedicated)**.
+    - **Goal**: Transformed Event Horizon Core into a pure multiplexer/manager for local MLX models.
+    - **Logic Removal**: Completely purged OpenRouter (Tier 3) and all remote fallback logic from the Go substrate and Python CLI.
+    - **Codebase Hardening**: Deleted `internal/providers/openrouter.go` and removed the `providers` package to minimize the attack surface and remove external API dependencies.
+    - **Documentation Update**: Overhauled `README.md` and `MODELS.md` to reflect a 100% "Local-Only" architecture for the 24GB M5.
+    - **Roadmap**: Moved remote integration items (Review Cycles, Failover) to a "Future Plan" section in `TASKS.md` for post-VRAM-optimization research.
+    - **Verification**: Confirmed binary build and CLI `status` are clean and functional.
+
 - **2026-03-31 17:05:00 PDT**: **Streamlining Phase: MLX-Only Substrate Finalized**.
     - **Optimization**: Decommissioned support for `llama.cpp` and `ollama` in the Go substrate. By focusing exclusively on MLX Metal bindings, we have reduced memory overhead and improved supervisor reliability on the 24GB M5.
     - **2-Tier Hierarchy**: The system is now a lean 2-Tier model:
