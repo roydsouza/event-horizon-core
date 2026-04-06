@@ -206,6 +206,50 @@
 - [ ] **Roy reviews** `docs/research/MLX_MULTIPLEXING_OPTIONS.md` and decides direction
 - [ ] **Implement chosen direction** (TBD — see research doc)
 
+## Phase 16: Zero-Interruption Model Pre-warming [NOT STARTED]
+
+> **Problem**: EHC's current hot-swap kills the running model and starts the new one
+> synchronously on the first request that references it. This means:
+> - Any agent mid-generation gets a 503 and must retry
+> - Even idle agents see a 20-30s stall on their next message after a swap
+> - There is no way to stage a model change in advance without affecting a running session
+>
+> **Solution**: Add a `POST /v1/preload` endpoint that loads a new model into memory in
+> the background **without** stopping the currently-serving model. Once the new model
+> reports healthy, EHC atomically cuts over — the running model serves until the last
+> moment. Agents experience zero 503s; the only visible effect is a ~1s pause at
+> cutover rather than a 20-30s stall.
+>
+> **Why this matters as the claw fleet grows**: With multiple agents running
+> (ZeroClaw, OpenClaw, HermesAgent, etc.), an operator-initiated model swap today
+> will 503 every active session simultaneously. Pre-warming makes model upgrades
+> transparent to all running agents — load the new model in the background, cut over
+> when it's hot, and no agent notices.
+
+- [ ] Add `POST /v1/preload` handler in `internal/server/handler.go`
+    - Accepts `{"model": "<hf-model-id>"}` body
+    - Launches background goroutine: starts a *second* mlx_lm.server instance on a
+      temporary port, waits for HTTP `/health` to confirm it's ready
+    - Returns `202 Accepted` immediately with `{"status":"preloading","model":"..."}`
+- [ ] Add `GET /v1/preload/status` to poll readiness of the warming model
+    - Returns `{"status":"warming"|"ready"|"failed","model":"...","elapsed_secs":N}`
+- [ ] On cutover: atomically swap the supervisor's active port from old → new,
+      SIGKILL the old server's process group (existing in-flight requests drain first
+      via a short grace period, e.g. 2s)
+- [ ] Update `GET /status` to report both active model and any warming model
+- [ ] Add test: preload model B while model A is serving, confirm A continues
+      serving during warm-up, confirm cutover is seamless
+- [ ] Document operator workflow in `README.md`:
+    ```bash
+    # Stage a model swap without interrupting running agents:
+    curl -s -X POST http://127.0.0.1:8000/v1/preload \
+      -H "Content-Type: application/json" \
+      -d '{"model":"mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"}'
+    # Poll until ready:
+    curl -s http://127.0.0.1:8000/v1/preload/status
+    # Cutover happens automatically once ready
+    ```
+
 ## Phase 14: Quality/Goodness Framework [NOT STARTED]
 - [ ] **Define Multi-Dimensional Benchmarks**:
     - [ ] **Tachyon Tongs (Firewall)**: Reasoning logic, prompt adherence, refusal robustness, MoE efficiency.
