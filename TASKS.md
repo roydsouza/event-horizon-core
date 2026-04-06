@@ -250,6 +250,32 @@
     # Cutover happens automatically once ready
     ```
 
+## Phase 17: Streaming Proxy Correctness [NOT STARTED]
+
+> **Discovered during OpenFang integration (2026-04-05)**
+>
+> EHC's current `HandleCompletions` uses `io.Copy(w, resp.Body)` to proxy responses. For
+> non-streaming requests this is correct. For SSE streaming (`stream: true`), `io.Copy`
+> uses a 32KB internal buffer — chunks from mlx_lm.server accumulate until the buffer
+> fills before being flushed to the client. This turns real-time token streaming into
+> a near-batch delivery from the client's perspective.
+>
+> **Impact**: OpenFang uses `stream: true` by default. Functionally correct (response
+> arrives eventually) but TTFT appears as full-generation time rather than first-token time.
+> IronClaw and ZeroClaw use non-streaming — not affected.
+>
+> **Fix**: Cast `ResponseWriter` to `http.Flusher` and call `Flush()` after each `io.Copy`
+> chunk, or use a custom SSE-aware copy loop.
+
+- [ ] Implement SSE-aware streaming proxy in `HandleCompletions`:
+  - Cast `w` to `http.Flusher`; call `Flush()` after each write
+  - Alternatively: line-buffered copy loop that flushes on `\n\n` boundaries
+  - Preserve current non-streaming path unchanged
+- [ ] Test: `curl -N http://127.0.0.1:8000/v1/chat/completions` with `"stream": true` — confirm tokens arrive incrementally
+- [ ] Benchmark: TTFT should match direct mlx_lm.server call within +5ms
+
+---
+
 ## Phase 14: Quality/Goodness Framework [NOT STARTED]
 - [ ] **Define Multi-Dimensional Benchmarks**:
     - [ ] **Tachyon Tongs (Firewall)**: Reasoning logic, prompt adherence, refusal robustness, MoE efficiency.
