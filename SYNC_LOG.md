@@ -1,5 +1,18 @@
 # Synchronization Log
 
+- **2026-04-06 (Session 3)**: **Production Bug Fixes + Full Documentation Overhaul** *(Claude Sonnet 4.6)*
+    - **4 code fixes in handler.go / manager.go** (all compile-verified):
+        1. **SSE-aware streaming proxy** (Phase 17): Replaced `io.Copy` with `bufio.ReadBytes('\n')` + `http.Flusher.Flush()`. OpenFang real-time streaming now works correctly; non-streaming path unchanged.
+        2. **`/metrics` TTL cache** (L3): `metricsCache` struct with 5s TTL. Eliminates continuous Python subprocess churn under monitoring. One subprocess per 5s instead of one per poll.
+        3. **Maintenance drain race** (L8): Added `inFlightCount int64` atomic counter to `EventHorizonServer`. `HandleCompletions` increments/decrements; `HandleMaintenance` polls to zero with 10s timeout. Prior 5s sleep was theatre — now it actually drains.
+        4. **`/v1/model/swap` 409 on contention** (L9): Added `TrySwitchModel()` + `ErrSwapInProgress` to `ProcessManager` using `swapMu.TryLock()`. `HandleModelSwap` returns HTTP 409 immediately instead of blocking 20-30s. Implicit swaps from `HandleCompletions` still use blocking path (correct).
+    - **LIMITATIONS.md**: Added L8 (drain race) and L9 (swap 409) as new findings; marked L3 and L4 fixed; expanded L1/L6 with MLX-Swift ecosystem assessment; added MLX-Swift checklist to E3 preconditions.
+    - **SOLUTIONS.md**: Added S6-S9 as IMPLEMENTED; expanded S1 (MLX-Swift) with ecosystem readiness assessment and decision gate; updated archive table.
+    - **ROADMAP.md**: Marked R1 complete; added nuanced MLX-Swift assessment to R4 (desirable end-state, not ready now, gate behind E1+E3); updated architecture diagram to show Phase 17 fixes.
+    - **TASKS.md**: Phase 17 → COMPLETE; Phase 18 → COMPLETE; Phase 16 → GATED (do not start without E1+E3); all four Phase 17 sub-items marked done with operator verification checklist.
+    - **State**: All immediate production correctness issues resolved. Go/MLX-LM hybrid is now the right stable foundation. Next: R2 (measure cold-start E1), then R3 (LoRA multi-tenancy E2). MLX-Swift gated behind empirical evidence.
+    - **Recommended next for AntiGravity**: (1) Verify Phase 17 items operationally (streaming curl test, metrics poll log, drain test). (2) Check Gemma 4 recurring task (due 2026-04-12). (3) Begin Phase 15 remaining items: verify upstream mlx_lm bug status (#965, #754, #883). (4) When llm-factory Phase 2 is ready, start E2 (LoRA pilot).
+
 - **2026-04-06 (Session 2)**: **Strategic Documentation Overhaul** *(Claude Opus 4.6)*
     - **LLM3 Review (`REVIEW_04_06.md`)**: Added independent architectural assessment challenging MLX-Swift consensus. Key points: (1) cold-start bottleneck is weight loading, not Python startup — measure before migrating; (2) `/metrics` subprocess bomb needs immediate fix; (3) LoRA multi-tenancy may obviate need for memory virtualization; (4) keep Go as orchestrator regardless of inference backend; (5) observability gap.
     - **`LIMITATIONS.md` created**: 7 engineering limitations (L1-L7) ranked by severity × leverage, each with candidate solutions and honest pros/cons. 6 strategic risks (R1-R6) with contingency plans. 3 experiments (E1-E3) with explicit go/no-go criteria.

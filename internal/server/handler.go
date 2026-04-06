@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,10 +12,23 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/roydsouza/event-horizon-core/internal/supervisor"
 )
+
+// metricsTTL is how long a cached /metrics response is served before re-running
+// the mlx.core subprocess. One subprocess spawn per 5s under continuous monitoring
+// instead of one per request.
+const metricsTTL = 5 * time.Second
+
+// metricsCache is a simple TTL-bounded single-entry cache for /metrics responses.
+type metricsCache struct {
+	mu        sync.Mutex
+	data      []byte
+	fetchedAt time.Time
+}
 
 type EventHorizonServer struct {
 	supervisor *supervisor.ProcessManager
@@ -25,6 +39,12 @@ type EventHorizonServer struct {
 	maintenanceMode  bool
 	maintenanceReqBy string
 	maintenanceSince string
+
+	// inFlightCount counts active HandleCompletions requests so HandleMaintenance
+	// can drain them before declaring the server fully in maintenance mode.
+	inFlightCount int64 // accessed via sync/atomic
+
+	metrics metricsCache
 }
 
 func NewEventHorizonServer(pm *supervisor.ProcessManager, port int) *EventHorizonServer {
@@ -36,7 +56,7 @@ func NewEventHorizonServer(pm *supervisor.ProcessManager, port int) *EventHorizo
 
 	s.mux.HandleFunc("/v1/chat/completions", s.HandleCompletions)
 	s.mux.HandleFunc("/status", s.HandleStatus)
-	
+
 	s.mux.HandleFunc("/system/maintenance", s.adminAuthMiddleware(s.HandleMaintenance))
 	s.mux.HandleFunc("/system/maintenance/release", s.adminAuthMiddleware(s.HandleMaintenanceRelease))
 	s.mux.HandleFunc("/system/maintenance/status", s.adminAuthMiddleware(s.HandleMaintenanceStatus))
@@ -54,7 +74,7 @@ func (s *EventHorizonServer) Start() error {
 
 func (s *EventHorizonServer) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	status := s.supervisor.GetStatus()
-	
+
 	s.maintMu.RLock()
 	mMode := s.maintenanceMode
 	mReqBy := s.maintenanceReqBy
@@ -63,13 +83,13 @@ func (s *EventHorizonServer) HandleStatus(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": status,
-		"port":   s.port,
-		"engine": "mlx_lm.server",
-		"maintenance_mode": mMode,
+		"status":                   status,
+		"port":                     s.port,
+		"engine":                   "mlx_lm.server",
+		"maintenance_mode":         mMode,
 		"maintenance_requested_by": mReqBy,
-		"maintenance_since": mSince,
-		"active_model": s.supervisor.CurrentModel(),
+		"maintenance_since":        mSince,
+		"active_model":             s.supervisor.CurrentModel(),
 	})
 }
 
@@ -83,11 +103,16 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": "EHC is in maintenance mode",
+			"error":       "EHC is in maintenance mode",
 			"retry_after": 60,
 		})
 		return
 	}
+
+	// Count this request as in-flight so HandleMaintenance can drain properly.
+	// Decrement happens on function return via defer.
+	atomic.AddInt64(&s.inFlightCount, 1)
+	defer atomic.AddInt64(&s.inFlightCount, -1)
 
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -106,11 +131,9 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 	}
 	json.Unmarshal(body, &req)
 
-	// Routing Logic: Assume local MLX (Tier 1) and trigger hot-swap if mismatch.
-
-	// Check if we need to hot-swap local MLX.
-	// Use context.Background() so the swap is not cancelled if the HTTP client
-	// disconnects or times out mid-load — a cancelled swap leaves mlx_lm.server dead.
+	// Trigger hot-swap if the client requested a different model.
+	// context.Background() is intentional — a client disconnect must not cancel
+	// a swap mid-flight, which would leave mlx_lm.server in an inconsistent state.
 	if req.Model != "" && req.Model != s.supervisor.CurrentModel() && req.Model != "default" {
 		log.Printf("[Server] Client requested model %s, but %s is currently loaded. Initiating Hot-Swap...", req.Model, s.supervisor.CurrentModel())
 		if err := s.supervisor.SwitchModel(context.Background(), req.Model); err != nil {
@@ -120,14 +143,13 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// Local Proxy to Supervised MLX Server (Port 8080)
+	// Proxy to supervised MLX server (port 8080).
 	targetURL := "http://127.0.0.1:8080/v1/chat/completions"
 	proxyReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, bytes.NewBuffer(body))
 	if err != nil {
 		http.Error(w, "Error creating proxy request", http.StatusInternalServerError)
 		return
 	}
-
 	for k, v := range r.Header {
 		proxyReq.Header[k] = v
 	}
@@ -145,7 +167,26 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 		w.Header()[k] = v
 	}
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+
+	// SSE-aware proxy: flush after each newline so streaming tokens reach the client
+	// incrementally rather than arriving in 32KB batches. ReadBytes('\n') returns each
+	// SSE line (including the terminating \n) as a single chunk; the Flusher ensures it
+	// is written to the wire immediately. For non-streaming responses the entire body
+	// arrives as one chunk and is written in a single pass — behaviour is unchanged.
+	flusher, canFlush := w.(http.Flusher)
+	reader := bufio.NewReaderSize(resp.Body, 4096)
+	for {
+		chunk, readErr := reader.ReadBytes('\n')
+		if len(chunk) > 0 {
+			w.Write(chunk)
+			if canFlush {
+				flusher.Flush()
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
 }
 
 func (s *EventHorizonServer) adminAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -191,14 +232,25 @@ func (s *EventHorizonServer) HandleMaintenance(w http.ResponseWriter, r *http.Re
 	sSince := s.maintenanceSince
 	s.maintMu.Unlock()
 
-	// Drain in-flight requests gracefully
-	time.Sleep(5 * time.Second)
+	// Drain: wait up to 10s for in-flight inference requests to complete.
+	// maintenanceMode is already true above, so new requests get 503 immediately.
+	// We poll inFlightCount until it reaches zero or the deadline expires.
+	drainDeadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(drainDeadline) {
+		if atomic.LoadInt64(&s.inFlightCount) == 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if remaining := atomic.LoadInt64(&s.inFlightCount); remaining > 0 {
+		log.Printf("[Server] Maintenance drain timeout: %d request(s) still in-flight, proceeding anyway", remaining)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "maintenance",
+		"status":       "maintenance",
 		"active_model": s.supervisor.CurrentModel(),
-		"since": sSince,
+		"since":        sSince,
 	})
 }
 
@@ -231,9 +283,9 @@ func (s *EventHorizonServer) HandleMaintenanceRelease(w http.ResponseWriter, r *
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "operational",
+		"status":       "operational",
 		"active_model": s.supervisor.CurrentModel(),
-		"promoted": promoted,
+		"promoted":     promoted,
 	})
 }
 
@@ -252,12 +304,16 @@ func (s *EventHorizonServer) HandleMaintenanceStatus(w http.ResponseWriter, r *h
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"in_maintenance": mMode,
-		"requested_by": reqBy,
-		"since": since,
-		"active_model": s.supervisor.CurrentModel(),
+		"requested_by":   reqBy,
+		"since":          since,
+		"active_model":   s.supervisor.CurrentModel(),
 	})
 }
 
+// HandleModelSwap handles explicit POST /v1/model/swap requests.
+// Returns HTTP 409 immediately if a swap is already in progress rather than
+// blocking for the full swap duration (20-30s). Clients should retry after
+// polling /system/maintenance/status.
 func (s *EventHorizonServer) HandleModelSwap(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -271,42 +327,66 @@ func (s *EventHorizonServer) HandleModelSwap(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Error parsing request", http.StatusBadRequest)
 		return
 	}
-	
+
 	if req.Model == "" {
 		http.Error(w, "Model field is required", http.StatusBadRequest)
 		return
 	}
-	
+
 	current := s.supervisor.CurrentModel()
 	if req.Model == current {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "success",
+			"status":       "success",
 			"active_model": current,
 		})
 		return
 	}
-	
+
 	log.Printf("[Server] Explicit model swap: %s -> %s", current, req.Model)
-	if err := s.supervisor.SwitchModel(context.Background(), req.Model); err != nil {
-		log.Printf("[Server] Hot-Swap Failed: %v", err)
+	if err := s.supervisor.TrySwitchModel(context.Background(), req.Model); err != nil {
+		if err == supervisor.ErrSwapInProgress {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": "model swap already in progress — poll /system/maintenance/status and retry",
+			})
+			return
+		}
+		log.Printf("[Server] Explicit swap failed: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to load model %s: %v", req.Model, err), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "success",
+		"status":       "success",
 		"active_model": req.Model,
 	})
 }
 
+// HandleMetrics returns MLX Metal memory statistics.
+// Responses are cached for metricsTTL (5s) to avoid spawning a Python subprocess
+// on every monitoring poll.
 func (s *EventHorizonServer) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	// Serve from cache if fresh.
+	s.metrics.mu.Lock()
+	if len(s.metrics.data) > 0 && time.Since(s.metrics.fetchedAt) < metricsTTL {
+		cached := make([]byte, len(s.metrics.data))
+		copy(cached, s.metrics.data)
+		s.metrics.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(cached)
+		return
+	}
+	s.metrics.mu.Unlock()
+
+	// Cache miss — spawn the subprocess.
 	cmdStr := "import mlx.core; import json; print(json.dumps({'active_mb': mlx.core.metal.get_active_memory()//1024//1024, 'peak_mb': mlx.core.metal.get_peak_memory()//1024//1024}))"
 	out, err := exec.Command("uv", "run", "python", "-c", cmdStr).Output()
 	if err != nil {
@@ -315,7 +395,11 @@ func (s *EventHorizonServer) HandleMetrics(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	s.metrics.mu.Lock()
+	s.metrics.data = out
+	s.metrics.fetchedAt = time.Now()
+	s.metrics.mu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	w.Write(out)
 }

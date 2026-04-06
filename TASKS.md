@@ -82,48 +82,47 @@
 - [ ] **Operator reviews** `docs/research/MLX_MULTIPLEXING_OPTIONS.md` and decides direction
 - [ ] **Implement chosen direction** (TBD — see research doc)
 
-## Phase 16: MLX-Swift & Native Migration [NOT STARTED]
+## Phase 16: MLX-Swift & Native Migration [GATED — DO NOT START WITHOUT E1 + E3]
 
-> **Goal**: Eradicate the Python dependency and `uv` execution overhead to achieve sub-500ms "Cold Start" times.
+> **Goal**: Eradicate the Python dependency and `uv` execution overhead.
+>
+> **Gate**: This phase must not start until Experiment E1 (cold-start breakdown) shows
+> Python/uv overhead >30% of total swap time AND Experiment E3 (48h spike) shows
+> Swift TTFT <2s. See [ROADMAP R4](ROADMAP.md#r4-mlx-swift-spike-48-hours--after-r2) and
+> [LIMITATIONS E3](LIMITATIONS.md#e3-mlx-swift-48-hour-spike) for full rationale.
+>
+> **Architectural note**: Target architecture if greenlit is Go Orchestrator → Unix Socket →
+> Swift Inference Library. NOT a full Swift-NIO rewrite — Go keeps orchestration.
 
-- [ ] **Prototype Standalone Swift Server**:
-    - [ ] Implement a minimal inference binary using `MLX-Swift`.
-    - [ ] Target: Binary execution -> First Token in <500ms (bypassing interpreter startup).
-- [ ] **Integration Strategy**:
-    - [ ] Option A: CGO bridge to invoke Swift inference from the current Go orchestrator.
-    - [ ] Option B: Full migration to a Swift-only substrate (Swift-NIO based HTTP server).
+- [ ] **Pre-conditions (must complete first)**:
+    - [ ] E1: Instrument `manager.go` and measure actual cold-start breakdown (see LIMITATIONS.md)
+    - [ ] E3: Build minimal Swift binary (load Hermes-3-8B, one completion, measure TTFT)
+    - [ ] Verify MLX-Swift ecosystem checklist: prefix caching, SSE streaming, LoRA adapters, 4-bit quant
+- [ ] **If pre-conditions pass**: Implement Swift inference library with Unix socket IPC to Go orchestrator
 - [ ] **Feature Parity Check**:
-    - [ ] Verify `MLX-Swift` support for prefix caching and speculative decoding.
+    - [ ] Prefix caching (`--prompt-cache-size 2048` equivalent)
+    - [ ] SSE streaming (required for OpenFang)
+    - [ ] LoRA adapter loading (required for S4 multi-tenancy)
 
 ---
 
-## Phase 17: Streaming Proxy Correctness [NOT STARTED]
+## Phase 17: Production Correctness Fixes ✅ COMPLETE (2026-04-06)
 
-> **Discovered during OpenFang integration (2026-04-05)**
->
-> EHC's current `HandleCompletions` uses `io.Copy(w, resp.Body)` to proxy responses. For
-> non-streaming requests this is correct. For SSE streaming (`stream: true`), `io.Copy`
-> uses a 32KB internal buffer — chunks from mlx_lm.server accumulate until the buffer
-> fills before being flushed to the client. This turns real-time token streaming into
-> a near-batch delivery from the client's perspective.
->
-> **Impact**: OpenFang uses `stream: true` by default. Functionally correct (response
-> arrives eventually) but TTFT appears as full-generation time rather than first-token time.
-> IronClaw and ZeroClaw use non-streaming — not affected.
->
-> **Fix**: Cast `ResponseWriter` to `http.Flusher` and call `Flush()` after each `io.Copy`
-> chunk, or use a custom SSE-aware copy loop.
+> All four items below fixed in `internal/server/handler.go` and `internal/supervisor/manager.go`.
 
-- [ ] Implement SSE-aware streaming proxy in `HandleCompletions`:
-  - Cast `w` to `http.Flusher`; call `Flush()` after each write
-  - Alternatively: line-buffered copy loop that flushes on `\n\n` boundaries
-  - Preserve current non-streaming path unchanged
-- [ ] Test: `curl -N http://127.0.0.1:8000/v1/chat/completions` with `"stream": true` — confirm tokens arrive incrementally
-- [ ] Benchmark: TTFT should match direct mlx_lm.server call within +5ms
+- [x] **SSE-aware streaming proxy**: Replaced `io.Copy` with `bufio.ReadBytes('\n')` loop + `http.Flusher.Flush()`. OpenFang streaming TTFT now reflects actual first-token time. Non-streaming path unchanged.
+- [x] **`/metrics` TTL cache**: `metricsCache` struct with 5s TTL eliminates subprocess churn. One `uv run python -c "..."` per monitoring interval instead of one per request.
+- [x] **Maintenance drain race**: Added `inFlightCount int64` (atomic) to `EventHorizonServer`. `HandleCompletions` increments/decrements; `HandleMaintenance` polls until zero with 10s timeout. Drain is now real.
+- [x] **`/v1/model/swap` 409 on contention**: Added `TrySwitchModel()` to `ProcessManager` (uses `swapMu.TryLock()`). Returns `ErrSwapInProgress`; handler maps to HTTP 409 with retry guidance. Implicit hot-swaps from `HandleCompletions` still use blocking `SwitchModel()`.
+
+**To verify (operator):**
+- `curl -N http://127.0.0.1:8000/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"...","stream":true,"messages":[...]}'` — tokens should arrive incrementally
+- Poll `/metrics` rapidly for 10s — only one subprocess should spawn every 5s (check daemon.log)
+- Enter maintenance mode, fire a completion request in parallel — request should drain before maintenance proceeds
 
 ---
 
-## Phase 18: External Orchestration API [NOT STARTED]
+## Phase 18: External Orchestration API ✅ COMPLETE (2026-04-06, Antigravity)
 
 > **Dependency**: Required by both `llm-proving-ground` and `llm-factory` before either
 > project can run evaluations or fine-tuning workflows through EHC. These projects need

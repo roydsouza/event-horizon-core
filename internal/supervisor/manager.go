@@ -21,6 +21,9 @@ const (
 	StatusError    ServerStatus = "error"
 )
 
+// ErrSwapInProgress is returned by TrySwitchModel when a model swap is already running.
+var ErrSwapInProgress = fmt.Errorf("model swap already in progress")
+
 type ProcessManager struct {
 	swapMu     sync.Mutex   // serializes hot-swaps; one swap at a time
 	mu         sync.RWMutex // protects modelPath and status field reads/writes
@@ -52,16 +55,12 @@ func (pm *ProcessManager) Start(ctx context.Context) error {
 
 	log.Printf("[Supervisor] Starting MLX server for model: %s on port %d", model, pm.port)
 
-	// Create command: uv run mlx_lm.server --model <model> --port <port>
-	// Advanced optimization: Injects --prompt-cache-size and --max-tokens to optimize Metal on M5
 	args := []string{"run", "mlx_lm.server",
 		"--model", pm.modelPath,
 		"--port", fmt.Sprintf("%d", pm.port),
-		"--prompt-cache-size", "2048", // Prefix Caching enabled by default
+		"--prompt-cache-size", "2048",
 	}
 
-	// Speculative Decoding: If a draft model is available (e.g. 1B for a 3B/7B primary), inject it.
-	// For now, we'll check for a conventionally named draft model or a specific env var.
 	if draft := os.Getenv("MLX_DRAFT_MODEL"); draft != "" {
 		log.Printf("[Supervisor] Enabling Speculative Decoding with draft model: %s", draft)
 		args = append(args, "--draft-model", draft)
@@ -69,7 +68,7 @@ func (pm *ProcessManager) Start(ctx context.Context) error {
 
 	pm.cmd = exec.CommandContext(ctx, "uv", args...)
 	pm.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	
+
 	pm.cmd.Stdout = os.Stdout
 	pm.cmd.Stderr = os.Stderr
 
@@ -80,7 +79,6 @@ func (pm *ProcessManager) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start mlx_lm.server: %w", err)
 	}
 
-	// Wait for process in a goroutine
 	go func() {
 		err := pm.cmd.Wait()
 		pm.mu.Lock()
@@ -134,15 +132,30 @@ func (pm *ProcessManager) WaitUntilHealthy(ctx context.Context) error {
 	}
 }
 
+// SwitchModel swaps the active model. Blocks until any in-progress swap completes.
+// Use TrySwitchModel if you need non-blocking behaviour (e.g. explicit /v1/model/swap API).
 func (pm *ProcessManager) SwitchModel(ctx context.Context, newModelPath string) error {
 	pm.swapMu.Lock()
 	defer pm.swapMu.Unlock()
+	return pm.doSwitch(ctx, newModelPath)
+}
 
-	// Re-check inside the lock: another goroutine may have already swapped to this model
-	// while we were waiting to acquire swapMu.
+// TrySwitchModel is like SwitchModel but returns ErrSwapInProgress immediately
+// if a swap is already running, rather than blocking.
+func (pm *ProcessManager) TrySwitchModel(ctx context.Context, newModelPath string) error {
+	if !pm.swapMu.TryLock() {
+		return ErrSwapInProgress
+	}
+	defer pm.swapMu.Unlock()
+	return pm.doSwitch(ctx, newModelPath)
+}
+
+// doSwitch is the shared implementation; callers must hold swapMu.
+func (pm *ProcessManager) doSwitch(ctx context.Context, newModelPath string) error {
 	pm.mu.RLock()
 	current := pm.modelPath
 	pm.mu.RUnlock()
+
 	if current == newModelPath {
 		log.Printf("[Supervisor] Model %s already loaded, skipping redundant swap", newModelPath)
 		return nil
@@ -168,7 +181,6 @@ func (pm *ProcessManager) Stop() error {
 
 	log.Printf("[Supervisor] Stopping server process group...")
 
-	// Send SIGKILL to the entire process group (negative PID)
 	err := syscall.Kill(-pm.cmd.Process.Pid, syscall.SIGKILL)
 	if err != nil {
 		return fmt.Errorf("failed to kill process group: %w", err)

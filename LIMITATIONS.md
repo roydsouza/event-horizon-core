@@ -30,17 +30,18 @@
 | Health check polling (500ms intervals) | ~1-3s | No |
 
 > [!WARNING]
-> The dominant cost is **weight loading**, which is language-independent. Rewriting in Swift eliminates ~2-4s of Python overhead but does not address the 15-25s core bottleneck.
+> The dominant cost is **weight loading**, which is language-independent. Rewriting in Swift eliminates ~2-4s of Python overhead but does not address the 15-25s core bottleneck. **Run Experiment E1 before committing to any language migration.**
 
 #### Candidate Solutions
 
-**A. MLX-Swift Native Server** → ROADMAP R2, TASKS Phase 16
+**A. MLX-Swift Native Server** → ROADMAP R4, TASKS Phase 16
 | | |
 |:--|:--|
 | **Approach** | Replace `uv run mlx_lm.server` with a compiled Swift binary using MLX-Swift |
 | **Pros** | Eliminates Python entirely (~2-4s savings); enables in-process model management (no SIGKILL cycle); potential for thread-level multi-model residency |
-| **Cons** | MLX-Swift serving ecosystem is immature; prefix caching and speculative decoding may need reimplementation; significant engineering effort (2-3 weeks) |
-| **Go/No-Go** | Run Experiment E1 first — if weight loading dominates, Swift saves <15% of total swap time |
+| **Cons** | MLX-Swift serving ecosystem is immature — lacks prefix caching, continuous batching, SSE streaming parity with `mlx_lm.server`; 2-4 months of reimplementation work; weight loading bottleneck is language-independent, so gains may be modest |
+| **Go/No-Go** | Run Experiment E1 first — if weight loading dominates (>85%), Swift saves <15% of total swap time. If Python overhead >30%, Swift has high leverage. |
+| **Assessment** | Desirable end-state; not ready for prime time as of April 2026. See [ROADMAP R4](ROADMAP.md#r4-mlx-swift-spike-48-hours--after-r2) for the gated spike approach. |
 
 **B. Python Pre-warming (Dual-Process)** → TASKS Phase 21
 | | |
@@ -98,53 +99,21 @@
 
 ---
 
-### L3: `/metrics` Subprocess Overhead ⬆️ HIGH
+### L3: `/metrics` Subprocess Overhead ✅ FIXED (2026-04-06)
 
-**Current state:** `GET /metrics` shells out to `uv run python -c "import mlx.core..."` on every call, spawning an entire Python interpreter to read two integers.
+**Was:** `GET /metrics` shelled out to `uv run python -c "import mlx.core..."` on every call, spawning an entire Python interpreter to read two integers.
 
-**Impact:** Continuous subprocess churn under monitoring; ~1-2s latency per metrics call; fails silently if `uv` environment is broken.
+**Fix applied:** TTL cache in `handler.go` — subprocess output cached for `metricsTTL` (5s). Cache miss still spawns subprocess; cache hit serves from memory. One subprocess spawn per monitoring interval instead of one per poll.
 
-#### Candidate Solutions
-
-**A. TTL Cache in Go** → No phase assigned (immediate fix)
-| | |
-|:--|:--|
-| **Approach** | Cache metrics output for 5 seconds; serve from cache on subsequent requests |
-| **Pros** | Trivial to implement (< 30 lines of Go); eliminates subprocess churn |
-| **Cons** | Metrics lag by up to 5s; doesn't eliminate Python dependency for metrics |
-
-**B. Read from macOS System APIs** → No phase assigned
-| | |
-|:--|:--|
-| **Approach** | Use `ioreg` or `sysctl` to read GPU memory stats directly from Go |
-| **Pros** | Zero Python dependency; real-time readings |
-| **Cons** | May not provide MLX-specific metrics (active vs. peak); less accurate |
-
-**C. Expose via Supervised Server** → No phase assigned
-| | |
-|:--|:--|
-| **Approach** | Request `mlx_lm.server` upstream add a `/metrics` endpoint (or use its existing capabilities) |
-| **Pros** | In-process, zero overhead; accurate MLX-specific readings |
-| **Cons** | Depends on upstream accepting the contribution; may not exist yet |
+**Remaining gap:** Python dependency for this metric still exists. Longer-term: upstream `mlx_lm.server` should expose this via its own `/metrics` or we read from `ioreg`/`sysctl` directly. See [S6](SOLUTIONS.md).
 
 ---
 
-### L4: Streaming Proxy Buffering ⬆️ MEDIUM
+### L4: Streaming Proxy Buffering ✅ FIXED (2026-04-06)
 
-**Current state:** `HandleCompletions` uses `io.Copy(w, resp.Body)` which buffers SSE chunks in a 32KB buffer before flushing.
+**Was:** `HandleCompletions` used `io.Copy(w, resp.Body)` which buffered SSE chunks in a 32KB buffer before flushing.
 
-**Impact:** OpenFang's streaming mode delivers tokens in batches rather than incrementally. TTFT appears as full generation time.
-
-**Phase:** TASKS Phase 17
-
-#### Candidate Solutions
-
-**A. Line-Buffered Flusher** → TASKS Phase 17
-| | |
-|:--|:--|
-| **Approach** | Cast `ResponseWriter` to `http.Flusher`; flush after every `\n\n` boundary |
-| **Pros** | ~20 lines of Go; preserves non-streaming path; matches direct-to-MLX TTFT |
-| **Cons** | None significant — this is a clear bug fix |
+**Fix applied:** Replaced with `bufio.ReadBytes('\n')` loop + `http.Flusher.Flush()` after each SSE line. Non-streaming responses are unaffected (they arrive as one chunk and are written in a single pass). See [S7](SOLUTIONS.md).
 
 ---
 
@@ -190,21 +159,15 @@
 | | |
 |:--|:--|
 | **Pros** | Eliminates Python entirely |
-| **Cons** | See L1 risks above |
+| **Cons** | See L1-A: serving ecosystem immature, significant reimplementation cost, weight loading bottleneck is language-independent |
 
-**B. Containerized Python** → No phase assigned
+**B. Pinned `uv.lock` + Upgrade Protocol** → Active (immediate)
 | | |
 |:--|:--|
-| **Approach** | Pin `mlx-lm` and dependencies in a container or frozen venv |
-| **Pros** | Python dependency becomes hermetic; immune to upstream breakage |
-| **Cons** | Metal GPU passthrough in containers is non-trivial on macOS; adds deployment complexity |
-
-**C. Pinned `uv.lock` + CI Validation** → No phase assigned (immediate fix)
-| | |
-|:--|:--|
-| **Approach** | Lock `uv.lock` and add CI that validates the venv builds cleanly on each commit |
-| **Pros** | Catches breakage early; trivial to implement |
+| **Approach** | Lock `uv.lock`, test new `mlx-lm` releases in `llm-proving-ground` dry-run before promoting to production |
+| **Pros** | Catches breakage early; trivial to maintain; handles the Phase 13 / Gemma 4 pattern |
 | **Cons** | Doesn't prevent runtime failures; still dependent on upstream |
+| **Status** | This is the current mitigation strategy |
 
 ---
 
@@ -216,19 +179,37 @@
 
 #### Candidate Solutions
 
-**A. Structured JSON Logging** → No phase assigned
+**A. Structured JSON Logging** → ROADMAP R5, No phase assigned
 | | |
 |:--|:--|
 | **Approach** | Replace `log.Printf` with `slog` (Go stdlib); emit JSON log lines with request ID, agent name, duration |
 | **Pros** | Stdlib, zero dependencies; parseable by any log tool |
 | **Cons** | Requires touching every log call site |
 
-**B. Lightweight Metrics Emitter** → No phase assigned
+**B. Lightweight Event Ring Buffer** → ROADMAP R5, No phase assigned
 | | |
 |:--|:--|
 | **Approach** | In-memory ring buffer of recent events (swaps, 503s, VRAM readings); exposed via `/debug/events` |
 | **Pros** | Self-contained; no external dependencies; useful for debugging |
 | **Cons** | Not a full observability solution; data lost on restart |
+
+---
+
+### L8: Maintenance Drain Race ✅ FIXED (2026-04-06)
+
+**Was:** `HandleMaintenance` set `maintenanceMode = true` and then immediately called `time.Sleep(5s)`. The sleep happened *after* the flag was set, meaning new requests got 503 correctly — but requests that had passed the maintenance check *before* the flag was set were still in-flight with no tracking mechanism. The "drain" was theatre.
+
+**Fix applied:** Added `inFlightCount int64` (atomic counter) to `EventHorizonServer`. `HandleCompletions` increments on entry (after the maintenance check) and decrements on return. `HandleMaintenance` polls `inFlightCount == 0` with a 10s deadline after setting the flag. Log line emitted if drain timeout is reached and requests are still in-flight.
+
+**Residual race (accepted):** There is a narrow window between a request passing the maintenance check and incrementing the counter where a concurrent `HandleMaintenance` call could observe `inFlightCount == 0` and proceed. In the operator-initiated maintenance context (not high-frequency), this window is sub-millisecond and the consequence is minor: at most one request runs into the maintenance window. The complexity of a fully atomic fix (using `sync.RWMutex` as a drain lock, holding it for the full proxy duration) is not justified for the current use case.
+
+---
+
+### L9: `/v1/model/swap` Blocked on In-Progress Swaps ✅ FIXED (2026-04-06)
+
+**Was:** `HandleModelSwap` called `SwitchModel()` which holds `swapMu.Lock()` — blocking indefinitely if another swap was already running. Callers had no way to detect this; they would hang for the full 20-30s swap duration.
+
+**Fix applied:** Added `TrySwitchModel()` to `ProcessManager` using `swapMu.TryLock()`. If a swap is already running, `HandleModelSwap` returns HTTP 409 with a message directing the caller to poll `/system/maintenance/status` and retry. `HandleCompletions`-initiated implicit swaps still use the blocking `SwitchModel()` (correct — those requests should wait for the current swap to finish before proxying).
 
 ---
 
@@ -302,7 +283,7 @@
 ## Experiments
 
 > Experiments to run using EHC's maintenance mode as a self-testing harness.
-> Each experiment has clear go/no-go criteria.
+> Each experiment has clear go/no-go criteria committed before starting.
 
 ### E1: Cold-Start Breakdown Measurement
 
@@ -314,7 +295,7 @@
 3. Swap between Hermes-3-8B and Llama-3.2-3B three times each direction
 4. Record all timings
 
-**Go/No-Go for MLX-Swift:** If Python startup + `uv` overhead is >30% of total swap time → Swift migration has high leverage. If <15% → optimize the weight loading path instead.
+**Go/No-Go for MLX-Swift:** If Python startup + `uv` overhead is >30% of total swap time → Swift migration has high leverage. If <15% → optimize the weight loading path instead (mmap, pre-warming).
 
 ### E2: LoRA Multi-Tenancy Pilot
 
@@ -331,9 +312,18 @@
 
 **Goal:** Determine if MLX-Swift can serve inference with significantly lower cold-start than Python.
 
+**Pre-conditions:** Run E1 first. Only proceed if Python/uv startup is >30% of swap time.
+
 **Method:**
 1. Build minimal Swift binary: load Hermes-3-8B, generate one completion
 2. Measure TTFT from binary execution to first token
 3. Compare against `uv run mlx_lm.server` TTFT
 
 **Go/No-Go:** If Swift TTFT is <2s (vs. current ~20-30s) → continue full Phase 16. If >10s → the bottleneck is weight loading, not Python, and Swift migration has limited value.
+
+**Additional checklist before committing to full Phase 16:**
+- [ ] Prefix caching available in MLX-Swift? (critical for multi-turn agent conversations)
+- [ ] SSE streaming supported? (required for OpenFang/real-time UX)
+- [ ] LoRA adapter loading supported?
+- [ ] Quantization support matches mlx-lm (4-bit, 8-bit)?
+- If any of the above are missing: estimate reimplementation cost before proceeding.
