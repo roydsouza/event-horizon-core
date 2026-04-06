@@ -1,4 +1,0 @@
-mlx-lm
-requests
-click
-python-dotenv

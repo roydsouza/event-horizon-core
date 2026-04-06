@@ -1,439 +1,0 @@
-2026/03/31 13:26:29 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:26:29 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:26:30,727 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 166661.09it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:26:32,116 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:26:32 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:26:32 [Server] Event Horizon Daemon listening on :8000
-2026/03/31 13:26:38 [Server] Client requested model mlx-community/Llama-3.2-1B-Instruct-4bit, but mlx-community/Llama-3.2-3B-Instruct-4bit is currently loaded. Initiating Hot-Swap...
-2026/03/31 13:26:38 [Supervisor] Hot-Swapping Model: mlx-community/Llama-3.2-3B-Instruct-4bit -> mlx-community/Llama-3.2-1B-Instruct-4bit
-2026/03/31 13:26:38 [Supervisor] Stopping server process group...
-2026/03/31 13:26:38 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-1B-Instruct-4bit on port 8080
-2026/03/31 13:26:38 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:26:38 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:26:39,797 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]2026-03-31 13:26:39,936 - INFO - HTTP Request: HEAD https://huggingface.co/mlx-community/Llama-3.2-1B-Instruct-4bit/resolve/08231374eeacb049a0eade7922910865b8fce912/config.json "HTTP/1.1 307 Temporary Redirect"
-2026-03-31 13:26:39,980 - INFO - HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/mlx-community/Llama-3.2-1B-Instruct-4bit/08231374eeacb049a0eade7922910865b8fce912/config.json "HTTP/1.1 200 OK"
-2026-03-31 13:26:40,022 - INFO - HTTP Request: GET https://huggingface.co/api/resolve-cache/models/mlx-community/Llama-3.2-1B-Instruct-4bit/08231374eeacb049a0eade7922910865b8fce912/config.json "HTTP/1.1 200 OK"
-Fetching 6 files:  17%|█▋        | 1/6 [00:00<00:01,  4.68it/s]2026-03-31 13:26:40,026 - INFO - HTTP Request: HEAD https://huggingface.co/mlx-community/Llama-3.2-1B-Instruct-4bit/resolve/08231374eeacb049a0eade7922910865b8fce912/tokenizer.json "HTTP/1.1 302 Found"
-2026-03-31 13:26:40,324 - INFO - HTTP Request: HEAD https://huggingface.co/mlx-community/Llama-3.2-1B-Instruct-4bit/resolve/08231374eeacb049a0eade7922910865b8fce912/special_tokens_map.json "HTTP/1.1 307 Temporary Redirect"
-2026-03-31 13:26:40,327 - INFO - HTTP Request: HEAD https://huggingface.co/mlx-community/Llama-3.2-1B-Instruct-4bit/resolve/08231374eeacb049a0eade7922910865b8fce912/model.safetensors.index.json "HTTP/1.1 307 Temporary Redirect"
-2026-03-31 13:26:40,327 - INFO - HTTP Request: HEAD https://huggingface.co/mlx-community/Llama-3.2-1B-Instruct-4bit/resolve/08231374eeacb049a0eade7922910865b8fce912/model.safetensors "HTTP/1.1 302 Found"
-Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-2026-03-31 13:26:40,328 - INFO - HTTP Request: HEAD https://huggingface.co/mlx-community/Llama-3.2-1B-Instruct-4bit/resolve/08231374eeacb049a0eade7922910865b8fce912/tokenizer_config.json "HTTP/1.1 307 Temporary Redirect"
-2026-03-31 13:26:40,328 - WARNING - Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-2026-03-31 13:26:40,373 - INFO - HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/mlx-community/Llama-3.2-1B-Instruct-4bit/08231374eeacb049a0eade7922910865b8fce912/model.safetensors.index.json "HTTP/1.1 200 OK"
-2026-03-31 13:26:40,376 - INFO - HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/mlx-community/Llama-3.2-1B-Instruct-4bit/08231374eeacb049a0eade7922910865b8fce912/special_tokens_map.json "HTTP/1.1 200 OK"
-2026-03-31 13:26:40,376 - INFO - HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/mlx-community/Llama-3.2-1B-Instruct-4bit/08231374eeacb049a0eade7922910865b8fce912/tokenizer_config.json "HTTP/1.1 200 OK"
-2026-03-31 13:26:40,412 - INFO - HTTP Request: GET https://huggingface.co/api/resolve-cache/models/mlx-community/Llama-3.2-1B-Instruct-4bit/08231374eeacb049a0eade7922910865b8fce912/model.safetensors.index.json "HTTP/1.1 200 OK"
-2026-03-31 13:26:40,416 - INFO - HTTP Request: GET https://huggingface.co/api/resolve-cache/models/mlx-community/Llama-3.2-1B-Instruct-4bit/08231374eeacb049a0eade7922910865b8fce912/special_tokens_map.json "HTTP/1.1 200 OK"
-2026-03-31 13:26:40,422 - INFO - HTTP Request: GET https://huggingface.co/api/resolve-cache/models/mlx-community/Llama-3.2-1B-Instruct-4bit/08231374eeacb049a0eade7922910865b8fce912/tokenizer_config.json "HTTP/1.1 200 OK"
-2026-03-31 13:26:40,439 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/xet-read-token/08231374eeacb049a0eade7922910865b8fce912 "HTTP/1.1 200 OK"
-2026-03-31 13:26:40,449 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/xet-read-token/08231374eeacb049a0eade7922910865b8fce912 "HTTP/1.1 200 OK"
-2026/03/31 13:27:08 [Server] Hot-Swap Failed: timeout waiting for server health on 127.0.0.1:8080
-2026/03/31 13:27:08 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:27:08 [Main] Received signal terminated. Initiating shutdown...
-2026/03/31 13:27:08 [Supervisor] Stopping server process group...
-2026/03/31 13:29:49 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:29:49 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:29:50,893 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 35098.78it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:29:52,558 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:29:52 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:29:52 [Server] Event Horizon Daemon listening on :8000
-2026/03/31 13:34:31 [Main] Received signal terminated. Initiating shutdown...
-2026/03/31 13:34:31 [Supervisor] Stopping server process group...
-2026/03/31 13:34:32 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:34:32 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:34:34,245 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 66052.03it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:34:35,758 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:34:35 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:34:35 [Server] Event Horizon Daemon listening on :8000
-2026/03/31 13:36:47 [Main] Received signal terminated. Initiating shutdown...
-2026/03/31 13:36:47 [Supervisor] Stopping server process group...
-2026/03/31 13:36:47 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:36:47 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:36:49,426 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 22231.29it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:36:50,911 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:36:50 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:36:50 [Server] Event Horizon Daemon listening on :8000
-2026/03/31 13:42:17 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:42:18 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-/Users/rds/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/resource_tracker.py:400: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-789hb8oj'}
-  warnings.warn(
-2026-03-31 13:42:20,079 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 51254.22it/s]
-2026/03/31 13:42:22 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:42:22 [Server] Event Horizon Daemon listening on :8000
-Traceback (most recent call last):
-  File "/Users/rds/antigravity/event-horizon-core/.venv/bin/mlx_lm.server", line 10, in <module>
-    sys.exit(main())
-             ~~~~^^
-  File "/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py", line 2025, in main
-    run(args.host, args.port, ModelProvider(args))
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py", line 1881, in run
-    _run_http_server(host, port, response_generator)
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py", line 1849, in _run_http_server
-    httpd = server_class(
-        server_address,
-    ...<5 lines>...
-        ),
-    )
-  File "/Users/rds/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/socketserver.py", line 457, in __init__
-    self.server_bind()
-    ~~~~~~~~~~~~~~~~^^
-  File "/Users/rds/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/http/server.py", line 140, in server_bind
-    socketserver.TCPServer.server_bind(self)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
-  File "/Users/rds/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/socketserver.py", line 478, in server_bind
-    self.socket.bind(self.server_address)
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
-OSError: [Errno 48] Address already in use
-2026/03/31 13:42:25 [Supervisor] Server process exited with error: signal: killed
-/Users/rds/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/resource_tracker.py:400: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-20z955ag'}
-  warnings.warn(
-2026/03/31 13:42:36 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:42:36 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026/03/31 13:42:36 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:42:36 [Server] Event Horizon Daemon listening on :8000
-2026-03-31 13:42:37,493 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 39016.78it/s]
-Traceback (most recent call last):
-  File "/Users/rds/antigravity/event-horizon-core/.venv/bin/mlx_lm.server", line 10, in <module>
-    sys.exit(main())
-             ~~~~^^
-  File "/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py", line 2025, in main
-    run(args.host, args.port, ModelProvider(args))
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py", line 1881, in run
-    _run_http_server(host, port, response_generator)
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py", line 1849, in _run_http_server
-    httpd = server_class(
-        server_address,
-    ...<5 lines>...
-        ),
-    )
-  File "/Users/rds/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/socketserver.py", line 457, in __init__
-    self.server_bind()
-    ~~~~~~~~~~~~~~~~^^
-  File "/Users/rds/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/http/server.py", line 140, in server_bind
-    socketserver.TCPServer.server_bind(self)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
-  File "/Users/rds/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/socketserver.py", line 478, in server_bind
-    self.socket.bind(self.server_address)
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
-OSError: [Errno 48] Address already in use
-/Users/rds/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/resource_tracker.py:400: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-dfd_q1da'}
-  warnings.warn(
-2026/03/31 13:42:46 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:42:46 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:42:47,643 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 83330.54it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:42:48,386 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:42:48 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:42:48 [Server] Event Horizon Daemon listening on :8000
-2026/03/31 13:42:49 [Main] Received signal terminated. Initiating shutdown...
-2026/03/31 13:42:49 [Supervisor] Stopping server process group...
-2026/03/31 13:43:10 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:43:10 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:43:11,139 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 32430.19it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:43:11,822 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:43:11 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:43:11 [Server] Event Horizon Daemon listening on :8000
-2026-03-31 13:43:20,522 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:43:20] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:43:20,639 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:43:20] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:43:20,742 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:43:20] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:43:20,848 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:43:20] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:43:20,953 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:43:20] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:43:21,073 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 65196.44it/s]
-2026-03-31 13:43:21,796 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:43:21] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:43:21,959 - INFO - Prompt processing progress: 37/38
-2026/03/31 13:43:22 [Server] Client requested model mlx-community/Llama-3.2-1B-Instruct-4bit, but mlx-community/Llama-3.2-3B-Instruct-4bit is currently loaded. Initiating Hot-Swap...
-2026/03/31 13:43:22 [Supervisor] Hot-Swapping Model: mlx-community/Llama-3.2-3B-Instruct-4bit -> mlx-community/Llama-3.2-1B-Instruct-4bit
-2026/03/31 13:43:22 [Supervisor] Stopping server process group...
-2026/03/31 13:43:22 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-1B-Instruct-4bit on port 8080
-2026/03/31 13:43:22 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:43:22 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:43:23,230 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]2026-03-31 13:43:23,375 - INFO - HTTP Request: HEAD https://huggingface.co/mlx-community/Llama-3.2-1B-Instruct-4bit/resolve/08231374eeacb049a0eade7922910865b8fce912/model.safetensors "HTTP/1.1 302 Found"
-2026-03-31 13:43:23,496 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/xet-read-token/08231374eeacb049a0eade7922910865b8fce912 "HTTP/1.1 200 OK"
-2026/03/31 13:43:52 [Server] Hot-Swap Failed: timeout waiting for server health on 127.0.0.1:8080
-2026/03/31 13:43:52 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:44:10 [Main] Received signal terminated. Initiating shutdown...
-2026/03/31 13:44:10 [Supervisor] Stopping server process group...
-2026/03/31 13:44:10 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:44:10 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:44:11,827 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 29537.35it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:44:12,641 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:44:12 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:44:12 [Server] Event Horizon Daemon listening on :8000
-2026-03-31 13:44:21,136 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:44:21] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:44:21,240 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:44:21] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:44:21,344 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:44:21] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:44:21,452 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:44:21] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:44:21,560 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:44:21] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:44:21,674 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 42013.06it/s]
-2026-03-31 13:44:22,457 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:44:22] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:44:22,607 - INFO - Prompt processing progress: 37/38
-2026/03/31 13:44:22 [Server] Client requested model mlx-community/Llama-3.2-1B-Instruct-4bit, but mlx-community/Llama-3.2-3B-Instruct-4bit is currently loaded. Initiating Hot-Swap...
-2026/03/31 13:44:22 [Supervisor] Hot-Swapping Model: mlx-community/Llama-3.2-3B-Instruct-4bit -> mlx-community/Llama-3.2-1B-Instruct-4bit
-2026/03/31 13:44:22 [Supervisor] Stopping server process group...
-2026/03/31 13:44:22 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-1B-Instruct-4bit on port 8080
-2026/03/31 13:44:22 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:44:22 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:44:24,152 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]2026-03-31 13:44:24,290 - INFO - HTTP Request: HEAD https://huggingface.co/mlx-community/Llama-3.2-1B-Instruct-4bit/resolve/08231374eeacb049a0eade7922910865b8fce912/model.safetensors "HTTP/1.1 302 Found"
-2026-03-31 13:44:24,415 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/xet-read-token/08231374eeacb049a0eade7922910865b8fce912 "HTTP/1.1 200 OK"
-2026/03/31 13:45:52 [Server] Hot-Swap Failed: timeout waiting for server health on 127.0.0.1:8080
-2026/03/31 13:45:52 [Supervisor] Server process exited with error: signal: killed
-/Users/rds/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/lib/python3.13/multiprocessing/resource_tracker.py:400: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-8zbdlmip'}
-  warnings.warn(
-2026/03/31 13:46:39 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:46:39 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:46:40,621 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 17427.86it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:46:41,865 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:46:41 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:46:41 [Server] Event Horizon Daemon listening on :8000
-2026/03/31 13:49:08 [Main] Received signal terminated. Initiating shutdown...
-2026/03/31 13:49:08 [Supervisor] Stopping server process group...
-2026/03/31 13:49:09 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:49:09 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:49:11,155 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 56173.71it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:49:12,562 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:49:12 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:49:12 [Server] Event Horizon Daemon listening on :8000
-2026-03-31 13:49:19,812 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:49:19] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:49:19,917 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:49:19] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:49:20,025 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:49:20] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:49:20,129 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:49:20] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:49:20,240 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:49:20] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:49:20,353 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 35746.91it/s]
-2026-03-31 13:49:21,224 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:49:21] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:49:21,361 - INFO - Prompt processing progress: 37/38
-2026/03/31 13:49:21 [Server] Client requested model mlx-community/Llama-3.2-1B-Instruct-4bit, but mlx-community/Llama-3.2-3B-Instruct-4bit is currently loaded. Initiating Hot-Swap...
-2026/03/31 13:49:21 [Supervisor] Hot-Swapping Model: mlx-community/Llama-3.2-3B-Instruct-4bit -> mlx-community/Llama-3.2-1B-Instruct-4bit
-2026/03/31 13:49:21 [Supervisor] Stopping server process group...
-2026/03/31 13:49:21 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-1B-Instruct-4bit on port 8080
-2026/03/31 13:49:21 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:49:21 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:49:22,630 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 36105.92it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:49:23,374 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:49:23 [Supervisor] Server is healthy on port 8080
-2026-03-31 13:49:23,546 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:49:23] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:49:23,941 - INFO - Prompt processing progress: 37/38
-2026/03/31 13:49:24 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:49:40 [Main] Received signal terminated. Initiating shutdown...
-2026/03/31 13:49:40 [Supervisor] Stopping server process group...
-2026/03/31 13:49:41 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:49:41 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:49:42,242 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 31068.92it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:49:43,199 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:49:43 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:49:43 [Server] Event Horizon Daemon listening on :8000
-2026-03-31 13:49:51,782 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:49:51] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:49:51,853 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:49:51] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:49:51,908 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:49:51] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:49:51,965 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:49:51] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:49:52,020 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:49:52] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:49:52,285 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:49:52,285 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:49:52,285 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:49:52,285 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:49:52,285 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:49:52,603 - INFO - KV Caches: 1 seq, 0.01 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:49:52] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:49:52,729 - INFO - Prompt processing progress: 7/8
-2026/03/31 13:49:52 [Server] Client requested model mlx-community/Llama-3.2-1B-Instruct-4bit, but mlx-community/Llama-3.2-3B-Instruct-4bit is currently loaded. Initiating Hot-Swap...
-2026/03/31 13:49:52 [Supervisor] Hot-Swapping Model: mlx-community/Llama-3.2-3B-Instruct-4bit -> mlx-community/Llama-3.2-1B-Instruct-4bit
-2026/03/31 13:49:52 [Supervisor] Stopping server process group...
-2026/03/31 13:49:52 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-1B-Instruct-4bit on port 8080
-2026/03/31 13:49:52 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:49:52 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:49:54,053 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 54471.48it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:49:54,810 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:49:54 [Supervisor] Server is healthy on port 8080
-2026-03-31 13:49:54,920 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:49:54] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:49:55,006 - INFO - Prompt processing progress: 37/38
-2026/03/31 13:49:55 [Server] Routing to OpenRouter: free
-2026/03/31 13:49:55 [Server] OpenRouter error: OPENROUTER_API_KEY not set
-2026/03/31 13:49:55 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:50:11 [Main] Received signal terminated. Initiating shutdown...
-2026/03/31 13:50:11 [Supervisor] Stopping server process group...
-2026/03/31 13:50:11 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:50:11 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:50:12,762 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 130392.87it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:50:13,858 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:50:14 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:50:14 [Server] Event Horizon Daemon listening on :8000
-2026-03-31 13:50:22,764 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:22] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:22,886 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:22] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:22,942 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:22] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:22,996 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:22] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:23,055 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:23] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:23,324 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:50:23,324 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:50:23,324 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:50:23,324 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:50:23,324 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:50:23,644 - INFO - KV Caches: 1 seq, 0.01 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:23] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:23,777 - INFO - Prompt processing progress: 7/8
-2026/03/31 13:50:23 [Server] Client requested model mlx-community/Llama-3.2-1B-Instruct-4bit, but mlx-community/Llama-3.2-3B-Instruct-4bit is currently loaded. Initiating Hot-Swap...
-2026/03/31 13:50:23 [Supervisor] Hot-Swapping Model: mlx-community/Llama-3.2-3B-Instruct-4bit -> mlx-community/Llama-3.2-1B-Instruct-4bit
-2026/03/31 13:50:23 [Supervisor] Stopping server process group...
-2026/03/31 13:50:23 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-1B-Instruct-4bit on port 8080
-2026/03/31 13:50:23 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026/03/31 13:50:23 [Supervisor] Server process exited with error: signal: killed
-2026-03-31 13:50:25,095 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 45181.01it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:50:25,839 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:50:25 [Supervisor] Server is healthy on port 8080
-2026-03-31 13:50:25,968 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:25] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:26,055 - INFO - Prompt processing progress: 37/38
-2026/03/31 13:50:26 [Server] Routing to OpenRouter: free
-2026/03/31 13:50:26 [Server] OpenRouter error: OPENROUTER_API_KEY not set
-2026/03/31 13:50:26 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:50:33 [Main] Received signal terminated. Initiating shutdown...
-2026/03/31 13:50:33 [Supervisor] Stopping server process group...
-2026/03/31 13:50:33 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 13:50:33 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:50:34,443 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 31536.12it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:50:36,039 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:50:36 [Supervisor] Server is healthy on port 8080
-2026/03/31 13:50:36 [Server] Event Horizon Daemon listening on :8000
-2026-03-31 13:50:36,194 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:36] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:36,258 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:36] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:36,316 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:36] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:36,371 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:36] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:36,426 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:36] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:36,889 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:50:36,890 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:50:36,890 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:50:36,890 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:50:36,890 - INFO - Prompt processing progress: 39/40
-2026-03-31 13:50:37,214 - INFO - KV Caches: 1 seq, 0.01 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:37] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:37,348 - INFO - Prompt processing progress: 7/8
-2026/03/31 13:50:37 [Server] Client requested model mlx-community/Llama-3.2-1B-Instruct-4bit, but mlx-community/Llama-3.2-3B-Instruct-4bit is currently loaded. Initiating Hot-Swap...
-2026/03/31 13:50:37 [Supervisor] Hot-Swapping Model: mlx-community/Llama-3.2-3B-Instruct-4bit -> mlx-community/Llama-3.2-1B-Instruct-4bit
-2026/03/31 13:50:37 [Supervisor] Stopping server process group...
-2026/03/31 13:50:37 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-1B-Instruct-4bit on port 8080
-2026/03/31 13:50:37 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:50:37 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 13:50:38,384 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 27624.40it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 13:50:39,161 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 13:50:39 [Supervisor] Server is healthy on port 8080
-2026-03-31 13:50:39,335 - INFO - KV Caches: 0 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:50:39] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:50:39,414 - INFO - Prompt processing progress: 37/38
-2026/03/31 13:50:39 [Server] Routing to OpenRouter: free
-2026/03/31 13:50:39 [OpenRouter] Resolving alias: free -> google/gemini-2.0-flash-exp:free
-2026/03/31 13:50:39 [Supervisor] Server process exited with error: signal: killed
-2026/03/31 13:51:10 [Server] OpenRouter error: Post "https://openrouter.ai/api/v1/chat/completions": dial tcp 104.18.2.115:443: i/o timeout
-2026/03/31 13:51:20 [Server] Routing to OpenRouter: free
-2026/03/31 13:51:20 [OpenRouter] Resolving alias: free -> google/gemini-2.0-flash-exp:free
-2026/03/31 13:51:51 [Server] OpenRouter error: Post "https://openrouter.ai/api/v1/chat/completions": dial tcp 104.18.3.115:443: i/o timeout
-2026-03-31 13:56:43,451 - INFO - HTTP Request: GET https://huggingface.co/api/models/default/revision/main "HTTP/1.1 401 Unauthorized"
-127.0.0.1 - - [31/Mar/2026 13:56:43] "POST /v1/chat/completions HTTP/1.1" 404 -
-2026-03-31 13:56:54,789 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-1B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 59918.63it/s]
-2026-03-31 13:56:55,718 - INFO - KV Caches: 1 seq, 0.00 GB, latest user cache 0 tokens
-127.0.0.1 - - [31/Mar/2026 13:56:55] "POST /v1/chat/completions HTTP/1.1" 200 -
-2026-03-31 13:56:55,925 - INFO - Prompt processing progress: 8/9
-2026/03/31 16:48:11 [Main] Received signal terminated. Initiating shutdown...
-2026/03/31 16:48:11 [Supervisor] Stopping server process group...
-2026/03/31 16:48:12 [Supervisor] Starting MLX server for model: mlx-community/Llama-3.2-3B-Instruct-4bit on port 8080
-2026/03/31 16:48:12 [Supervisor] Waiting for port 127.0.0.1:8080 to become healthy...
-2026-03-31 16:48:14,706 - INFO - HTTP Request: GET https://huggingface.co/api/models/mlx-community/Llama-3.2-3B-Instruct-4bit/revision/main "HTTP/1.1 200 OK"
-Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 31575.69it/s]
-/Users/rds/antigravity/event-horizon-core/.venv/lib/python3.13/site-packages/mlx_lm/server.py:1858: UserWarning: mlx_lm.server is not recommended for production as it only implements basic security checks.
-  warnings.warn(
-2026-03-31 16:48:16,533 - INFO - Starting httpd at 127.0.0.1 on port 8080...
-2026/03/31 16:48:16 [Supervisor] Server is healthy on port 8080
-2026/03/31 16:48:16 [Server] Event Horizon Daemon listening on :8000
