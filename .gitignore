@@ -32,20 +32,31 @@ coverage.xml
 venv/
 ENV/
 .env
+.venv/
 
 # Secrets & Local Config
 .env.*
 *.secret
 secrets.yaml
 OpenRouter_API_KEY.txt
-
-# Virtual environments
-.venv/
-uv.lock
+*.key
+*.pem
+*.crt
+*.pub
+*.env.local
+*.env.development
+*.env.test
+*.env.production
 
 # Compiled Go binaries
 event-horizon
 event-horizon-*
+*.exe
+*.dll
+*.so
+*.dylib
+*.o
+*.a
 
 # Log files
 *.log

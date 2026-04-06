@@ -1,5 +1,22 @@
 # Synchronization Log
 
+- **2026-04-06 (Session 2)**: **Strategic Documentation Overhaul** *(Claude Opus 4.6)*
+    - **LLM3 Review (`REVIEW_04_06.md`)**: Added independent architectural assessment challenging MLX-Swift consensus. Key points: (1) cold-start bottleneck is weight loading, not Python startup — measure before migrating; (2) `/metrics` subprocess bomb needs immediate fix; (3) LoRA multi-tenancy may obviate need for memory virtualization; (4) keep Go as orchestrator regardless of inference backend; (5) observability gap.
+    - **`LIMITATIONS.md` created**: 7 engineering limitations (L1-L7) ranked by severity × leverage, each with candidate solutions and honest pros/cons. 6 strategic risks (R1-R6) with contingency plans. 3 experiments (E1-E3) with explicit go/no-go criteria.
+    - **`ROADMAP.md` created**: Directional document with architectural diagram, strategic principles ("measure before migrating"), and 7 prioritized roadmap items (R1-R7). Includes decision log tracing all architectural choices to their rationale.
+    - **`TASKS.md` restructured**: Archived Phases 1-12 into a collapsible summary table. Added cross-references to LIMITATIONS.md and ROADMAP.md. Cleaned up duplicate sections and orphaned tasks.
+    - **Document taxonomy established**: LIMITATIONS.md (diagnosis) → ROADMAP.md (decisions) → TASKS.md (execution). Three documents, three cadences, three audiences.
+    - **State**: No code changes. Documentation-only session establishing the strategic framework for future development.
+
+- **2026-04-06**: **Phase 18 Complete + Architectural Pivot** *(Gemini 3.1 Pro / Antigravity)*
+    - **Phase 18 (External Orchestration API) Delivered**: Implemented `/system/maintenance`, `/system/maintenance/release`, `/v1/model/swap`, and `/metrics` in the Go substrate. Added admin token authentication. Verified through `llm-factory` (Phase 2) and `llm-proving-ground` (Phase 3) integration.
+    - **Technical Review (`REVIEW_04_06.md`)**: Analyzed current Go/Python hybrid vs. M5 constraints. Identified "Cold Start" (30s swap time) and "Python Dependency" as primary architectural weaknesses. Logged a discussion thread detailing the architectural debate between Gemini Flash (LLM1) and Gemini 3.1 Pro (LLM2).
+    - **TASKS.md Strategic Reordering**:
+        - **Phase 16 (MLX-Swift)**: Advanced the Pure Swift migration to Phase 16 as the highest-priority architectural fix for sub-500ms cold starts.
+        - **Phases 19 & 20 (Virtualization & Thermals)**: Reordered directly behind Swift. Highlighted the risks of relying on model-swapping at 95°C vs. rate-limiting.
+        - **Phase 21 (Pre-warming)**: Relegated the previous Python-based pre-warming logic to Phase 21 with a deprecation notice, contingent on the success of the MLX-Swift rewrite.
+    - **State**: Infrastructure is solid and multi-agent safe. The strategic roadmap points fully toward a native Swift substrate for future high-performance local agent execution.
+
 - **2026-04-05**: **Phase 18 Planning + Cross-Project Dependencies** *(Claude Code)*
     - **DEPENDENTS.md created**: Registers `llm-proving-ground` and `llm-factory` as dependents of EHC. Documents the required API surface each project expects from Phase 18, and the coordination protocol for EHC entering maintenance mode.
     - **TASKS.md updated**: Added Phase 18 — External Orchestration API (`POST /system/maintenance`, `POST /system/maintenance/release`, `GET /system/maintenance/status`, `POST /v1/model/swap`, `GET /metrics`, admin token auth, integration test). Cache audit changed from monthly to weekly.
