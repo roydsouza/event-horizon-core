@@ -1,46 +1,60 @@
 # Anthropic Integration: Event Horizon Core
 
-This guide explains how to use the centralized `event-horizon-core` inference engine from within your `~/anthropic` projects.
+This guide explains how to use the centralized **Event Horizon Core** inference engine from within your `~/anthropic` projects.
 
-## Prerequisites
-- macOS on Apple Silicon (M1/M2/M3/M4)
-- Python 3.10+
-- Ollama (optional, for Ollama provider)
+## 🚀 The Unified Interface (OpenAI Compatible)
 
-## Setup Instructions
+The Event Horizon Core Go Daemon (Port 8000) provides a drop-in compatible OpenAI endpoint for all local MLX models. Projects no longer need to import Python logic from the core; they simply treat it as a remote LLM API that happens to be running on localhost.
 
-### 1. Link the Core Package
-In the terminal of your Anthropic project (and inside its virtual environment), run:
+## Setup Instructions (Python)
 
-```bash
-pip install -e ~/antigravity/event-horizon-core
-```
+### 1. Requirements
+Ensure your project has `requests` or the `openai` Python library installed.
 
-This installs the core in "editable" mode, meaning any updates to the core are immediately available to your Anthropic project.
-
-### 2. Basic Usage (Python)
+### 2. Integration via OpenAI SDK (Recommended)
+This is the most robust way to interact with the local MLX models.
 
 ```python
-from event_horizon_core import LLMFactory
+from openai import OpenAI
 
-# Use MLX (Native Apple Silicon performance)
-mlx = LLMFactory.get_provider("mlx", model_path="mlx-community/Llama-3.2-3B-Instruct-4bit")
-response = mlx.generate("Explain quantum entanglement.")
-print(response)
+client = OpenAI(
+    base_url="http://127.0.0.1:8000/v1",
+    api_key="sk-antigravity"  # Placeholder key
+)
 
-# Use Ollama
-ollama = LLMFactory.get_provider("ollama", model="llama3.1")
-response = ollama.generate("What is the event horizon?")
-print(response)
+response = client.chat.completions.create(
+    model="mlx-community/Llama-3.2-3B-Instruct-4bit",
+    messages=[{"role": "user", "content": "Hello from your agent"}]
+)
+
+print(response.choices[0].message.content)
 ```
 
-### 3. CLI Usage
-Once installed, the `event-horizon` command will be available in your path:
+### 3. Integration via standard `requests`
+For zero-dependency lightweight scripts:
+
+```python
+import requests
+
+payload = {
+    "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+    "messages": [{"role": "user", "content": "Explain quantum entanglement."}]
+}
+
+resp = requests.post("http://127.0.0.1:8000/v1/chat/completions", json=payload)
+print(resp.json()["choices"][0]["message"]["content"])
+```
+
+## 🛠️ CLI Interop
+If you need to trigger inference from the shell within your project:
 
 ```bash
+# Verify the daemon is healthy
 event-horizon status
-event-horizon generate mlx "Hello from Anthropic"
+
+# Generate directly
+event-horizon generate "Your prompt" --model "mlx-community/Llama-3.1-8B-Instruct-4bit"
 ```
 
-## Maintenance
-To add new providers or models, modify the code in `~/antigravity/event-horizon-core`. Changes are shared across all linked projects.
+## ⚠️ Important: VRAM Awareness
+When multiple agents from different `~/anthropic` projects request different models, the Go substrate will perform a **Hot-Swap**. This adds roughly 3-5 seconds of latency to the first request while the weights are reloaded into Metal. Sticking to a common model across projects (e.g. Llama-3.1-8B) will eliminate this latency.

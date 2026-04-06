@@ -6,7 +6,7 @@
 > captures known alternatives for better concurrent and multi-model serving on Apple Silicon
 > before any backend change is committed to.
 >
-> **Decision needed from Roy**: Which direction, if any, to pursue after broader research.
+> **Decision needed from operator**: Which direction, if any, to pursue after broader research.
 
 ---
 

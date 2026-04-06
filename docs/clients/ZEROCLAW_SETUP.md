@@ -1,22 +1,22 @@
 # ZeroClaw Setup
 
-ZeroClaw is a minimalist agentic framework and can be configured to use `event-horizon-core` backends.
+ZeroClaw is a minimalist agentic framework and must be configured to use the **Event Horizon Core** Go proxy.
 
 ## Connection Details
 
-ZeroClaw expects an OpenAI-compatible endpoint. Since the core's **Ollama** provider supports this natively, use the following:
+ZeroClaw expects an OpenAI-compatible endpoint. Point it directly to the background Go Daemon:
 
-- **Endpoint**: `http://localhost:11434/v1`
-- **Model**: `llama3.2` (Recommended for speed) or `qwen2.5-coder` (Recommended for code)
+- **Endpoint**: `http://localhost:8000/v1`
+- **Model**: `mlx-community/Llama-3.2-3B-Instruct-4bit` (Recommended for pure speed)
 
 ## Configuration
 
 Update your `.env` or `config.json` in the ZeroClaw directory:
 
 ```env
-ZEROCLAW_API_BASE=http://localhost:11434/v1
-ZEROCLAW_API_KEY=ollama
-ZEROCLAW_MODEL=llama3.2
+ZEROCLAW_API_BASE=http://localhost:8000/v1
+ZEROCLAW_API_KEY=sk-antigravity
+ZEROCLAW_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit
 ```
 
 ## Local CLI Validation
@@ -24,5 +24,5 @@ ZEROCLAW_MODEL=llama3.2
 Test your connection before launching ZeroClaw:
 
 ```bash
-event-horizon generate ollama "Hello ZeroClaw" --model llama3.2
+event-horizon generate "Hello ZeroClaw" --model "mlx-community/Llama-3.2-3B-Instruct-4bit"
 ```

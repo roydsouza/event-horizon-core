@@ -26,7 +26,7 @@ For OpenCode, you want a model with a deep "understanding" of repository structu
 
 ### Comparison for 24 GB RAM (MLX)
 
-| Model | Primary Use | Est. RAM (4-bit) | Why for Roy? |
+| Model | Primary Use | Est. RAM (4-bit) | Notes |
 | :--- | :--- | :--- | :--- |
 | **GLM-4.7-Flash** | Agentic (Claws) | ~14-16 GB | Winner of 2026 agentic challenges; best "intelligence-to-size" ratio. |
 | **Qwen3 30B A3B** | Long Context Agents | ~16.5 GB | Superior stability for long DeFi/Coding research sessions. |

@@ -36,11 +36,11 @@ tests/                  — Hardware benchmark suite, regression tests
 
 **Concurrent access** — ensuring the Go substrate correctly handles simultaneous requests from multiple downstream agents (`hermes_agent`, `open_claw`, `open_fang`) without VRAM leaks, lock contention, or zombie processes.
 
-Always check `TASKS.md` (and `tasks/` subdirectory if present) on session open to identify the highest-priority work item, then confirm with Roy before starting.
+Always check `TASKS.md` (and `tasks/` subdirectory if present) on session open to identify the highest-priority work item, then confirm with the operator before starting.
 
 ## 5. Workflows & Agent Expectations
 
-- **Opening ritual:** `git pull` → read `SYNC_LOG.md` → **check `🔁 Recurring Tasks` table** (surface any item with Next Due ≤ today to Roy before starting other work)
+- **Opening ritual:** `git pull` → read `SYNC_LOG.md` → **check `🔁 Recurring Tasks` table** (surface any item with Next Due ≤ today to the operator before starting other work)
 - **TASKS.md contract:** Mark in-progress with `/`, complete with full checkmark, update `SYNC_LOG.md` after each task
 - **Testing:** Run `uv run python3 tests/hardware_benchmark.py` and all regression tests before marking done
 - **Documentation:** Keep `README.md`, `SYNC_LOG.md`, and inline docs in sync with implementation at all times

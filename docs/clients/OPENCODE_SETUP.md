@@ -1,27 +1,24 @@
 # OpenCode Setup
 
-OpenCode can use `event-horizon-core` as its local intelligence engine.
+OpenCode is an IDE-integrated agent and requires a high-performance local backend for real-time suggestions.
 
 ## Configuration
 
-To hook up OpenCode to use the core's Ollama provider, update your `~/.config/opencode/config.yaml`:
+To hook up OpenCode to use the **Event Horizon Core** Go Substrate:
 
 ```yaml
-providers:
-  ollama:
-    base_url: "http://localhost:11434"
-    model: "qwen2.5-coder:14b" # Recommended for M5-24GB
-
-profiles:
-  ghost:
-    provider: "ollama"
-    model: "qwen2.5-coder:14b"
+# config.yaml
+llm:
+  provider: "openai"
+  api_base: "http://localhost:8000/v1"
+  api_key: "sk-antigravity"
+  model: "mlx-community/Qwen2.5-7B-Instruct-4bit"
 ```
 
-## Running with the Core CLI
+## CLI Performance Validation
 
-You can also use the `event-horizon` CLI to test prompts before running them in OpenCode:
+Test the coding speed on your M5:
 
 ```bash
-event-horizon generate ollama "Write a python script to parse logs" --model qwen2.5-coder:14b
+event-horizon generate "Write a python script to parse logs" --model "mlx-community/Qwen2.5-7B-Instruct-4bit"
 ```

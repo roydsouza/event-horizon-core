@@ -1,5 +1,12 @@
 # Synchronization Log
 
+- **2026-04-05**: **Phase 18 Planning + Cross-Project Dependencies** *(Claude Code)*
+    - **DEPENDENTS.md created**: Registers `llm-proving-ground` and `llm-factory` as dependents of EHC. Documents the required API surface each project expects from Phase 18, and the coordination protocol for EHC entering maintenance mode.
+    - **TASKS.md updated**: Added Phase 18 — External Orchestration API (`POST /system/maintenance`, `POST /system/maintenance/release`, `GET /system/maintenance/status`, `POST /v1/model/swap`, `GET /metrics`, admin token auth, integration test). Cache audit changed from monthly to weekly.
+    - **Documentation cleanup**: Removed personal references across all doc files. `.gitignore` updated to exclude `__pycache__`, `*.pyc`, `.env`, evaluation artifacts.
+    - **State**: Phase 18 is not yet implemented. `llm-proving-ground` EHC client stubs those endpoints and raises `EHCNotImplemented` until they land. Use `--dry-run` for end-to-end pipeline testing until then.
+    - **Next**: Build Phase 18 Go handlers in `internal/handler/` and expose them on the existing HTTP mux. See `TASKS.md` Phase 18 for full spec.
+
 - **2026-04-04**: **Phase 15: Concurrency Correctness + Multiplexing Research** *(Claude Code)*
     - **Trigger**: Architecture review surfaced a critical hot-swap race condition and
       documented concurrency bugs in `mlx_lm.server` (KV cache contamination at 16+ concurrent
@@ -19,7 +26,7 @@
         - Key open question: are the mlx_lm.server concurrency bugs already fixed upstream?
           Check before committing to any backend change.
     - **State**: Mutex fix shipped. Decision on backend multiplexing direction deferred to
-      Roy's review of `docs/research/MLX_MULTIPLEXING_OPTIONS.md`. Phase 13 (Gemma 4) remains
+      operator review of `docs/research/MLX_MULTIPLEXING_OPTIONS.md`. Phase 13 (Gemma 4) remains
       on hold pending official mlx-lm architecture support.
 
 - **2026-04-01 21:16:00 PDT**: **Phase 12: Default Model Pivot (Hermes-3 Apex)**.

@@ -14,7 +14,7 @@ import (
 func main() {
 	// 1. Initialize Supervisor for MLX (Target: port 8080)
 	// In the final version, the model path would come from environment or persistent config.
-	modelPath := "mlx-community/Llama-3.2-3B-Instruct-4bit"
+	modelPath := "mlx-community/Hermes-3-Llama-3.1-8B-4bit"
 	pm := supervisor.NewProcessManager(modelPath, 8080)
 
 	// 2. Start Supervisor

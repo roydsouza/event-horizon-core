@@ -1,59 +1,56 @@
 # Event Horizon Core: Developer Guide
 
-This guide describes how to extend and maintain the `event-horizon-core` package.
+This guide describes the architecture and maintenance of the **Event Horizon Core** Go Substrate.
 
-## Architecture Architecture
+## 🏗️ Architecture
 
-`event-horizon-core` follows a simple **Factory Pattern**:
+Event Horizon Core consists of a high-performance **Go Daemon** that supervises local inference engines and a **Python Thin Client** for CLI interaction.
 
-1.  **Providers** (`event_horizon_core/providers/`): Implement the `BaseLLMProvider` interface.
-2.  **Factory** (`event_horizon_core/factory.py`): Manages the registration and instantiation of providers.
-3.  **CLI** (`event_horizon_core/cli.py`): Provides a unified user interface.
+### 1. Go Substrate (The Daemon)
+Located in `internal/`, the Go substrate is responsible for:
+- **Process Management** (`internal/supervisor`): Dynamically launches, monitors, and hot-swaps `mlx_lm.server` instances.
+- **Anti-Zombie Mutex**: Uses Process Groups (`syscall.Setpgid`) to bind child processes to the daemon. If the daemon is killed, the entire process tree (including MLX) is instantly reaped by the OS.
+- **HTTP Proxy** (`internal/server`): An OpenAI-compatible REST server (Port 8000) that implements blocking hot-swap middleware.
 
-## Adding a New Provider
+### 2. Python Thin Client
+Located in `event_horizon_core/`, the Python package provides the `event-horizon` CLI. It contains zero inference logic and acts purely as a proxy to the Go Daemon.
 
-To add a new LLM backend (e.g., `llama.cpp`, `vllm`):
+## 🛠️ Development Workflow
 
-1.  **Create the Provider File**:
-    In `event_horizon_core/providers/`, create `new_provider.py`. Inherit from `BaseLLMProvider`.
-
-    ```python
-    from .base import BaseLLMProvider
-    
-    class NewProvider(BaseLLMProvider):
-        def generate(self, prompt, system_prompt=None, **kwargs):
-            # Implementation here
-            return "response"
-        
-        def is_healthy(self) -> bool:
-            return True
-    ```
-
-2.  **Register with the Factory**:
-    In `event_horizon_core/factory.py`, import your new provider and add it to the `PROVIDERS` dictionary.
-
-    ```python
-    from .providers.new_provider import NewProvider
-    
-    PROVIDERS = {
-        "new": NewProvider,
-        # ...
-    }
-    ```
-
-## VRAM Calculation
-
-The `MLXProvider` implements a `get_vram_estimate()` method. When adding new local providers, ensure you include memory safety checks to prevent crashing the OS on your 24GB M5.
-
-## Testing
-
-Run tests from the root directory:
-
+### Building the Daemon
+The daemon should be compiled with Go 1.22+:
 ```bash
-pytest tests/
+go build -o event-horizon ./cmd/event-horizon
 ```
 
-Individual provider tests:
+### Running in Development
+To run the daemon manually for debugging:
 ```bash
-pytest tests/test_mlx.py
+./event-horizon start --port 8000
 ```
+
+## 🔄 Hot-Swap Implementation Details
+
+When a client requests a model (`req.Model`) that is not currently active, the `internal/server/handler.go` middleware:
+1.  Intercepts the request.
+2.  Calls `supervisor.SwitchModel(ctx, modelName)`.
+3.  The supervisor kills the active MLX server and launches a new one.
+4.  The server polls the MLX health port until ready.
+5.  The original HTTP request is released and forwarded to the new local backend.
+
+## 🧪 Testing
+
+### Go Internal Tests
+Run standard Go tests for supervisor and server logic:
+```bash
+go test ./internal/...
+```
+
+### Stress Testing (Python)
+Use the Python suite to simulate concurrent agent load:
+```bash
+uv run pytest tests/test_torture.py
+```
+
+## 🔐 Security & Hardened Attack Surface
+By moving to a "Local Only" architecture, we have eliminated external API dependencies and orphaned provider code. The daemon now only listens on `127.0.0.1`, ensuring that inference remains strictly isolated to the host M5 hardware.

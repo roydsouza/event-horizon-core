@@ -3,12 +3,12 @@
 ## 🔁 Recurring Tasks
 
 > **Opening ritual for both agents**: On every session open, check the table below.
-> If `Next Due` ≤ today, surface the item to Roy before starting other work.
+> If `Next Due` ≤ today, surface the item to the operator before starting other work.
 > After completing a recurring task, update `Next Due` by adding the interval to today's date.
 
 | Frequency | Next Due | Task | Notes |
 |:----------|:---------|:-----|:------|
-| Monthly | 2026-05-05 | **Model cache audit** — review `~/.cache/huggingface/hub/`, decide what to keep/remove | See "Model Cache Inventory" section below for current state |
+| Weekly | 2026-04-12 | **Model cache audit** — review `~/.cache/huggingface/hub/`, decide what to keep/remove. Cross-check with `llm-proving-ground/reports/cache-manifest.md` for evaluation downloads. | See "Model Cache Inventory" section below for current state |
 | Weekly | 2026-04-12 | **Gemma 4 26B A4B readiness check** — is `mlx-lm >= 0.32.x` on PyPI? Is PR #1112 closed? | `uv run python3 -c "from mlx_lm.models import gemma4; print('ready')"` and check https://github.com/ml-explore/mlx-lm/pull/1112 |
 
 ---
@@ -128,8 +128,8 @@
     - [ ] Local model acts as primary author; reaches out to remote models (Claude/Gemini) for critical reviews, arguments, and counter-points.
     - [ ] Unified interface for comparing local MLX output with remote reasoning models.
 - [ ] **Advanced Concurrency & KV Caching**:
-    - [ ] Implement the [Concurrency Architecture](file:///Users/rds/antigravity/event-horizon-core/docs/research/concurrency_architecture.md) blueprint for multi-agent VRAM efficiency.
-    - [ ] Leverage [M5 Model Benchmarks](file:///Users/rds/antigravity/event-horizon-core/docs/research/model_benchmarks_m5.md) to optimize local-only agentic performance.
+    - [ ] Implement the [Concurrency Architecture](docs/research/concurrency_architecture.md) blueprint for multi-agent VRAM efficiency.
+    - [ ] Leverage [M5 Model Benchmarks](docs/research/model_benchmarks_m5.md) to optimize local-only agentic performance.
 
 ## Phase 11: Hardware Performance & SLO Verification [COMPLETE]
 - [x] **New Performance Suite**: 
@@ -203,7 +203,7 @@
 - [ ] **Verify upstream mlx_lm bug status**: Check if #965, #754, #883 are fixed in current
     `pip install mlx_lm`. If fixed, no backend change needed. Run: `uv run pip show mlx_lm`
     and check its changelog against the issue numbers.
-- [ ] **Roy reviews** `docs/research/MLX_MULTIPLEXING_OPTIONS.md` and decides direction
+- [ ] **Operator reviews** `docs/research/MLX_MULTIPLEXING_OPTIONS.md` and decides direction
 - [ ] **Implement chosen direction** (TBD — see research doc)
 
 ## Phase 16: Zero-Interruption Model Pre-warming [NOT STARTED]
@@ -273,6 +273,51 @@
   - Preserve current non-streaming path unchanged
 - [ ] Test: `curl -N http://127.0.0.1:8000/v1/chat/completions` with `"stream": true` — confirm tokens arrive incrementally
 - [ ] Benchmark: TTFT should match direct mlx_lm.server call within +5ms
+
+---
+
+## Phase 18: External Orchestration API [NOT STARTED]
+
+> **Dependency**: Required by both `llm-proving-ground` and `llm-factory` before either
+> project can run evaluations or fine-tuning workflows through EHC. These projects need
+> to signal EHC to enter a controlled state, swap in a specific model, and then resume
+> normal operation — all without disrupting currently-running station agents.
+>
+> **Cross-project context**: See `llm-proving-ground/COEXISTENCE.md` and
+> `llm-factory/COEXISTENCE.md` for the architectural rationale.
+
+- [ ] **`POST /system/maintenance`** — Enter maintenance mode
+    - Accepts `{"reason": "string", "requested_by": "llm-proving-ground|llm-factory"}`
+    - Sets an internal `maintenanceMode bool` flag (protected by `sync.RWMutex`)
+    - All subsequent `/v1/chat/completions` requests immediately return `HTTP 503` with
+      `Retry-After: 60` and `{"error":"EHC is in maintenance mode","retry_after":60}`
+    - In-flight requests drain with a configurable grace period (default: 5s) before
+      the flag flips
+    - Returns `{"status":"maintenance","active_model":"<current>","since":"<timestamp>"}`
+- [ ] **`POST /system/maintenance/release`** — Exit maintenance mode
+    - Accepts optional `{"promote_model": "<hf-model-id>"}` — if provided, the swapped-in
+      model becomes the new default; if absent, EHC reverts to the pre-maintenance model
+    - Clears the `maintenanceMode` flag; queued agents resume immediately
+    - Returns `{"status":"operational","active_model":"<model>","promoted": true|false}`
+- [ ] **`GET /system/maintenance/status`** — Poll current state
+    - Returns `{"in_maintenance": bool, "requested_by": "...", "since": "...", "active_model": "..."}`
+    - Safe to call at any time; useful for proving ground / factory to confirm lock before starting
+- [ ] **`POST /v1/model/swap`** — Explicit model swap (usable inside or outside maintenance mode)
+    - Accepts `{"model": "<hf-model-id>"}` — wraps existing `SwitchModel()` logic
+    - Returns 409 if a swap is already in progress
+    - This makes the hot-swap externally addressable, replacing ad-hoc model param tricks
+- [ ] **Add auth token check** to all `/system/*` endpoints
+    - Read from `EHC_ADMIN_TOKEN` env var (set in `.env`, never committed)
+    - Reject with `HTTP 401` if header `X-EHC-Admin-Token` is absent or wrong
+    - Prevents accidental or malicious maintenance locks from untrusted callers
+- [ ] **Update `GET /status`** to include `maintenance_mode` and `maintenance_requested_by` fields
+- [ ] **`GET /metrics`** — MLX memory telemetry (add alongside maintenance API)
+    - Shells out to `uv run python -c "import mlx.core; import json; print(json.dumps({'active_mb': mlx.core.metal.get_active_memory()//1024//1024, 'peak_mb': mlx.core.metal.get_peak_memory()//1024//1024}))"` within the EHC uv environment
+    - Returns `{"active_mb": N, "peak_mb": N}` — used by proving ground for precise per-model VRAM readings
+    - Proving ground falls back to `ioreg` polling if this endpoint is unavailable
+- [ ] **Add integration test** for the full proving-ground cycle:
+    - `POST /system/maintenance` → confirm 503 on `/v1/chat/completions` → `POST /v1/model/swap`
+      → run a test completion → `POST /system/maintenance/release` → confirm 200 resumes
 
 ---
 

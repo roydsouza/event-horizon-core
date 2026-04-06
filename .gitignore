@@ -39,6 +39,17 @@ ENV/
 secrets.yaml
 OpenRouter_API_KEY.txt
 
+# Virtual environments
+.venv/
+uv.lock
+
+# Compiled Go binaries
+event-horizon
+event-horizon-*
+
+# Log files
+*.log
+
 # IDEs
 .vscode/
 .idea/
