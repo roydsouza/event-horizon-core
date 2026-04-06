@@ -286,7 +286,7 @@
 > **Cross-project context**: See `llm-proving-ground/COEXISTENCE.md` and
 > `llm-factory/COEXISTENCE.md` for the architectural rationale.
 
-- [ ] **`POST /system/maintenance`** — Enter maintenance mode
+- [x] **`POST /system/maintenance`** — Enter maintenance mode
     - Accepts `{"reason": "string", "requested_by": "llm-proving-ground|llm-factory"}`
     - Sets an internal `maintenanceMode bool` flag (protected by `sync.RWMutex`)
     - All subsequent `/v1/chat/completions` requests immediately return `HTTP 503` with
@@ -294,28 +294,28 @@
     - In-flight requests drain with a configurable grace period (default: 5s) before
       the flag flips
     - Returns `{"status":"maintenance","active_model":"<current>","since":"<timestamp>"}`
-- [ ] **`POST /system/maintenance/release`** — Exit maintenance mode
+- [x] **`POST /system/maintenance/release`** — Exit maintenance mode
     - Accepts optional `{"promote_model": "<hf-model-id>"}` — if provided, the swapped-in
       model becomes the new default; if absent, EHC reverts to the pre-maintenance model
     - Clears the `maintenanceMode` flag; queued agents resume immediately
     - Returns `{"status":"operational","active_model":"<model>","promoted": true|false}`
-- [ ] **`GET /system/maintenance/status`** — Poll current state
+- [x] **`GET /system/maintenance/status`** — Poll current state
     - Returns `{"in_maintenance": bool, "requested_by": "...", "since": "...", "active_model": "..."}`
     - Safe to call at any time; useful for proving ground / factory to confirm lock before starting
-- [ ] **`POST /v1/model/swap`** — Explicit model swap (usable inside or outside maintenance mode)
+- [x] **`POST /v1/model/swap`** — Explicit model swap (usable inside or outside maintenance mode)
     - Accepts `{"model": "<hf-model-id>"}` — wraps existing `SwitchModel()` logic
     - Returns 409 if a swap is already in progress
     - This makes the hot-swap externally addressable, replacing ad-hoc model param tricks
-- [ ] **Add auth token check** to all `/system/*` endpoints
+- [x] **Add auth token check** to all `/system/*` endpoints
     - Read from `EHC_ADMIN_TOKEN` env var (set in `.env`, never committed)
     - Reject with `HTTP 401` if header `X-EHC-Admin-Token` is absent or wrong
     - Prevents accidental or malicious maintenance locks from untrusted callers
-- [ ] **Update `GET /status`** to include `maintenance_mode` and `maintenance_requested_by` fields
-- [ ] **`GET /metrics`** — MLX memory telemetry (add alongside maintenance API)
+- [x] **Update `GET /status`** to include `maintenance_mode` and `maintenance_requested_by` fields
+- [x] **`GET /metrics`** — MLX memory telemetry (add alongside maintenance API)
     - Shells out to `uv run python -c "import mlx.core; import json; print(json.dumps({'active_mb': mlx.core.metal.get_active_memory()//1024//1024, 'peak_mb': mlx.core.metal.get_peak_memory()//1024//1024}))"` within the EHC uv environment
     - Returns `{"active_mb": N, "peak_mb": N}` — used by proving ground for precise per-model VRAM readings
     - Proving ground falls back to `ioreg` polling if this endpoint is unavailable
-- [ ] **Add integration test** for the full proving-ground cycle:
+- [x] **Add integration test** for the full proving-ground cycle:
     - `POST /system/maintenance` → confirm 503 on `/v1/chat/completions` → `POST /v1/model/swap`
       → run a test completion → `POST /system/maintenance/release` → confirm 200 resumes
 
