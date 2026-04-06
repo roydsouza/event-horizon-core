@@ -3,7 +3,7 @@
 > **Purpose:** Directional document. Records where Event Horizon Core is heading,
 > what bets we're placing, and why. Updated when we **decide** something.
 >
-> **Cross-references:** [LIMITATIONS.md](LIMITATIONS.md) (diagnosis) · [TASKS.md](TASKS.md) (execution) · [REVIEW_04_06.md](REVIEW_04_06.md) (discussion)
+> **Cross-references:** [LIMITATIONS.md](LIMITATIONS.md) (diagnosis) · [TASKS.md](TASKS.md) (execution) · [REVIEW_04_06.md](REVIEW_04_06.md) (discussion) · [SOLUTIONS.md](SOLUTIONS.md) (how)
 
 ---
 

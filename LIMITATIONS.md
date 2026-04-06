@@ -4,7 +4,7 @@
 > and what external risks could change our trajectory. Each limitation includes
 > candidate solutions with honest pros/cons. Updated when we **discover** something new.
 >
-> **Cross-references:** [ROADMAP.md](ROADMAP.md) (decisions) · [TASKS.md](TASKS.md) (execution)
+> **Cross-references:** [ROADMAP.md](ROADMAP.md) (decisions) · [TASKS.md](TASKS.md) (execution) · [SOLUTIONS.md](SOLUTIONS.md) (how)
 
 ---
 
