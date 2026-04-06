@@ -1,5 +1,18 @@
 # Event Horizon Core: Tasks
 
+## 🔁 Recurring Tasks
+
+> **Opening ritual for both agents**: On every session open, check the table below.
+> If `Next Due` ≤ today, surface the item to Roy before starting other work.
+> After completing a recurring task, update `Next Due` by adding the interval to today's date.
+
+| Frequency | Next Due | Task | Notes |
+|:----------|:---------|:-----|:------|
+| Monthly | 2026-05-05 | **Model cache audit** — review `~/.cache/huggingface/hub/`, decide what to keep/remove | See "Model Cache Inventory" section below for current state |
+| Weekly | 2026-04-12 | **Gemma 4 26B A4B readiness check** — is `mlx-lm >= 0.32.x` on PyPI? Is PR #1112 closed? | `uv run python3 -c "from mlx_lm.models import gemma4; print('ready')"` and check https://github.com/ml-explore/mlx-lm/pull/1112 |
+
+---
+
 ## Phase 1: Environment & Setup [MUST COMPLETE]
 - [x] **OpenRouter Activation**:
     - [x] Obtain API Key from [OpenRouter.ai](https://openrouter.ai/keys).
@@ -199,3 +212,27 @@
     - [ ] **Claw (Agent)**: Tool-calling precision, JSON schema adherence, TTFT (latency), context window utilization (128K+).
 - [ ] **Create Prototype "Goodness Score"**:
     - [ ] Script to aggregate TPS, TTFT, and a weighted reasoning score into a single normalized value per hardware profile (M5 25GB).
+
+---
+
+## Model Cache Inventory
+
+> Last audited: 2026-04-05. Cache root: `~/.cache/huggingface/hub/`
+> Total size at last audit: **49 GB** (after removing Qwen2.5-Coder-32B and incomplete Gemma 4 26B)
+> To audit: `du -sh ~/.cache/huggingface/hub/models--* | sort -rh`
+
+| Model | Size | Status | Decision |
+|:------|:-----|:-------|:---------|
+| `Qwen2.5-32B-Instruct-4bit` | 17 GB | Cached — not configured for active use | Review at next audit |
+| `gemma-2-27b-it-4bit` | 14 GB | Cached — not configured for active use | Review at next audit |
+| `Mistral-Nemo-Instruct-2407-4bit` | 6.4 GB | Cached — not configured for active use | Review at next audit |
+| `gemma-4-e4b-it-4bit` | 4.9 GB | Cached — small Gemma 4 variant (4B active) | Keep — candidate for Tachyon Tongs/firewall profile |
+| `Hermes-3-Llama-3.1-8B-4bit` | 4.2 GB | **Active** — EHC default model | Keep |
+| `Llama-3.2-3B-Instruct-4bit` | 1.7 GB | Cached — draft model candidate for speculative decoding | Keep |
+| `Llama-3.2-1B-Instruct-4bit` | 680 MB | Cached — draft model candidate | Keep |
+| `Qwen2.5-Coder-32B-Instruct-4bit` | — | **Removed 2026-04-05** — OOMs on 24GB M5 during generation | — |
+| `gemma-4-26b-a4b-it-4bit` | — | **Removed 2026-04-05** — incomplete download (mlx-lm unsupported) | Re-download when mlx-lm >= 0.32.x |
+
+**Pending downloads:**
+- `mlx-community/Qwen2.5-Coder-14B-Instruct-4bit` (~8.8 GB) — target coding model for ZeroClaw (see claws/zeroclaw/TASKS.md)
+- `mlx-community/gemma-4-26b-a4b-it-4bit` (~15.6 GB) — re-download when mlx-lm >= 0.32.x + PR #1112 closed
