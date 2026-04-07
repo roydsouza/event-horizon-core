@@ -1,74 +1,154 @@
-# 🔌 Event Horizon Integration Guide
+# Event Horizon Core — Integration Guide
 
-This document provides technical specifications for integrating **AntiGravity** agents (OpenClaw, ZeroClaw, OpenFang, Hermes, Tachyon Tongs) with the **Event Horizon Core** Go Substrate.
+> **Cross-references:** [ROADMAP.md](ROADMAP.md) · [LIMITATIONS.md](LIMITATIONS.md) · [SOLUTIONS.md](SOLUTIONS.md) · [docs/clients/](docs/clients/)
 
-## 🚀 Transparent Compatibility (OpenAI Standard)
-
-Event Horizon Core is designed to be **drop-in compatible** with any client that supports the **OpenAI API Standard**. It acts as a high-performance proxy on Port `8000`.
-
-### 🛣️ Endpoints
-- **Chat Completions**: `http://127.0.0.1:8000/v1/chat/completions` (OpenAI Compatible)
-- **Status/Health**: `http://127.0.0.1:8000/status`
+EHC exposes a local HTTP server on **port 8000** that is drop-in compatible with the OpenAI Chat Completions API. All station agents (Claws, firewall, monitoring daemons) connect here. The Go daemon proxies requests to `mlx_lm.server` on port 8080 and manages the model lifecycle.
 
 ---
 
-## 🛠️ Integration Mapping for Common Clients
+## Required: Agent Identity Header
 
-### 1. Clients expecting OpenAI (e.g., Hermes, ZeroClaw)
-Most agents expect `OPENAI_BASE_URL` and `OPENAI_API_KEY`.
+**Every client MUST send `X-Agent-Name` on every request to `/v1/chat/completions`.**
 
-**Configuration:**
-- `OPENAI_BASE_URL="http://127.0.0.1:8000/v1"`
-- `OPENAI_API_KEY="sk-antigravity"` (Any non-empty string works for local MLX)
+```
+X-Agent-Name: <your-agent-slug>   # e.g. zeroclaw, shapeshifter-firewall, penumbra
+```
 
-### 2. Clients expecting Ollama (e.g., legacy scripts)
-Event Horizon does **not** spoof the `/api/generate` Ollama-specific endpoint.
+This header is EHC's identity primitive. It enables:
+- Per-agent metrics (`GET /metrics/agents`, Phase 24)
+- Config-driven model routing — EHC assigns the right model automatically (Phase 24)
+- Firewall interception — EHC calls Shapeshifter-Airlock before proxying (ROADMAP R8)
 
-**Modification Needed:**
-- Update the client to use the `openai` provider instead of `ollama`.
-- Point the base URL to `http://127.0.0.1:8000/v1`.
-
-### 3. Clients expecting OpenRouter (e.g., OpenClaw, Tachyon Tongs)
-Event Horizon handles inference **locally**. You do NOT need to configure the client to talk to OpenRouter directly.
-
-**Configuration:**
-- Point the client to Event Horizon (`http://127.0.0.1:8000/v1`).
-- Set the `model` to a specific MLX HuggingFace path (e.g. `mlx-community/Llama-3.1-8B-Instruct-4bit`).
-- The Go substrate will automatically detect if the model should be hot-swapped locally.
+Omitting it is accepted today (request is processed, warning logged) but will become a hard requirement once Phase 24 lands.
 
 ---
 
-## 🧠 Model Selection Logic
+## Endpoints
 
-### 1. Explicit Model Injection
-Agents must provide a valid **HuggingFace path** that supports MLX in the standard `model` field.
+### Station Agent Endpoints (no auth required)
 
-| Type | Target Model | Best For... |
-| :--- | :--- | :--- |
-| **Logic/Draft** | `mlx-community/Llama-3.2-3B-Instruct-4bit` | Fast background tasks & reflection. |
-| **Reasoning** | `mlx-community/Llama-3.1-8B-Instruct-4bit` | General intelligence & tool-use. |
-| **Coding** | `mlx-community/Qwen2.5-7B-Instruct-4bit` | High intelligence/logic in 7B range. |
+| Method | Path | Description |
+|:-------|:-----|:------------|
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions. Streaming supported (SSE). |
+| `GET`  | `/status` | Daemon health: current model, maintenance mode, engine. |
 
-### 2. Automatic Hot-Swapping
-The substrate will automatically detect if the requested model differs from the one currently loaded in VRAM. It will gracefully bounce the server to load the new weights while blocking the client connection to prevent 502 errors.
+### Infrastructure / Admin Endpoints (require `X-EHC-Admin-Token` header)
+
+| Method | Path | Description |
+|:-------|:-----|:------------|
+| `POST` | `/system/maintenance` | Enter maintenance mode — new completions get 503. |
+| `POST` | `/system/maintenance/release` | Exit maintenance mode. Optional `promote_model` field. |
+| `GET`  | `/system/maintenance/status` | Poll maintenance state and active model. |
+| `POST` | `/v1/model/swap` | Explicit model swap. Returns 409 if swap already in progress. |
+| `GET`  | `/metrics` | MLX Metal memory telemetry (`active_mb`, `peak_mb`). TTL-cached 5s. |
+
+Admin token is read from the `EHC_ADMIN_TOKEN` environment variable (set in `.env`, never committed). All `/system/*` and `/metrics` calls are rejected with HTTP 401 if the token is absent or wrong.
 
 ---
 
-## 🧪 Quick Test (cURL)
+## Station Agent Integration
 
-To verify a client's ability to connect before deployment:
+Station agents (Claws, firewall, monitoring) use the completions endpoint directly. They do **not** need to know which model is loaded — EHC's routing table resolves the model by agent name.
 
 ```bash
 curl http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "X-Agent-Name: zeroclaw" \
   -d '{
-    "model": "mlx-community/Llama-3.2-3B-Instruct-4bit",
-    "messages": [{"role": "user", "content": "Hello Core"}]
+    "messages": [{"role": "user", "content": "Hello"}]
   }'
 ```
 
-## ⚠️ AntiGravity Deployment Note
-When AntiGravity installs a new agent, it MUST:
-1. Ensure the `event-horizon` daemon is running (`launchctl list | grep eventhorizon`).
-2. Inject `EVENT_HORIZON_URL="http://127.0.0.1:8000/v1"` into the agent's `.env`.
-3. Set the agent's default `MODEL_ID` to a validated local MLX path.
+**Do not send a `model` field** unless you have a specific reason. Station agents should let EHC choose the model. Once Phase 24 (routing table) is live, the pin for your agent slug will determine the model automatically.
+
+**Environment variables** for OpenAI-compatible clients:
+```bash
+OPENAI_BASE_URL="http://127.0.0.1:8000/v1"
+OPENAI_API_KEY="sk-local"   # any non-empty string — no remote auth needed
+```
+
+See `docs/clients/` for per-agent setup guides.
+
+---
+
+## Infrastructure Caller Integration (llm-proving-ground, llm-factory)
+
+Infrastructure callers need to take exclusive control of EHC before running evaluations or training. They use the maintenance API:
+
+```python
+import httpx
+
+ADMIN_HEADERS = {
+    "X-EHC-Admin-Token": os.environ["EHC_ADMIN_TOKEN"],
+    "X-Agent-Name": "llm-proving-ground",
+    "Content-Type": "application/json",
+}
+
+# 1. Enter maintenance mode — existing inference drains (up to 10s)
+r = httpx.post("http://127.0.0.1:8000/system/maintenance",
+               headers=ADMIN_HEADERS,
+               json={"reason": "evaluation run", "requested_by": "llm-proving-ground"})
+
+# 2. Swap to the model under evaluation
+r = httpx.post("http://127.0.0.1:8000/v1/model/swap",
+               headers=ADMIN_HEADERS,
+               json={"model": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"})
+
+# 3. Run evaluation (completions work even in maintenance mode for admin callers — implement this in Phase 24)
+# For now: release maintenance first, then run, then re-enter for cleanup.
+
+# 4. Release — optionally promote the tested model as new default
+r = httpx.post("http://127.0.0.1:8000/system/maintenance/release",
+               headers=ADMIN_HEADERS,
+               json={"promote_model": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"})
+```
+
+See `COEXISTENCE.md` in `llm-proving-ground/` and `llm-factory/` for full protocol.
+
+---
+
+## Model Selection Logic
+
+| Caller type | How model is chosen |
+|:------------|:-------------------|
+| Station agent, no `model` field | Routing table pin for agent name; falls back to station default (`Hermes-3-8B`) |
+| Station agent, explicit `model` field | Triggers implicit hot-swap to the requested model — **avoid unless intentional** |
+| Infrastructure caller, explicit `model` field + admin token | Full control; use `/v1/model/swap` via maintenance API |
+
+**Current station default:** `mlx-community/Hermes-3-Llama-3.1-8B-4bit`
+
+Routing table pins are configured in `config.toml` (Phase 24 — not yet implemented; all agents currently use the default).
+
+---
+
+## Streaming
+
+EHC supports Server-Sent Events (SSE) streaming. Set `"stream": true` in the request body. The proxy flushes each SSE line to the client immediately rather than buffering.
+
+```bash
+curl -N http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Agent-Name: zeroclaw" \
+  -d '{"messages": [{"role": "user", "content": "Count to 5"}], "stream": true}'
+```
+
+---
+
+## Memory Constraints
+
+EHC runs on a 24 GB unified memory M5. The active model (~4.6 GB for Hermes-3-8B) occupies non-compressible Metal-backed memory. This leaves ~19 GB for the OS, other apps, and KV cache.
+
+- **Do not request models larger than ~14B parameters at 4-bit** — they will OOM during generation.
+- **Do not run llm-factory training while other agents are active** — training is the most VRAM-intensive operation on the station; it requires exclusive maintenance mode.
+- **Monitor memory pressure** with `vm_stat | grep "Pages free"` — if free pages < 60,000 (~1 GB), close other apps before sending long prompts.
+- **Future:** Phase 23 will add a `/system/memory` endpoint that exposes pressure level (normal/warn/critical) so clients can back off proactively.
+
+---
+
+## Deployment Checklist (new agent)
+
+1. Set `OPENAI_BASE_URL=http://127.0.0.1:8000/v1` and `OPENAI_API_KEY=sk-local` in the agent's `.env`.
+2. Add `X-Agent-Name: <slug>` to every completions request. Document in the agent's setup guide.
+3. Verify EHC is running: `curl http://127.0.0.1:8000/status`.
+4. Do **not** hardcode a `model` field — let EHC resolve it from the routing table (once Phase 24 lands).
+5. Use `--dry-run` mode in any script that touches the maintenance API before running live.

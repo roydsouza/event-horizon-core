@@ -20,17 +20,20 @@
 
 **Impact:** Every active agent gets a 503 during swaps. As the claw fleet grows, a single operator-initiated swap disrupts all sessions simultaneously.
 
-**Root cause breakdown (estimated, needs measurement — see Experiment E1):**
-| Component | Estimated Time | Language-dependent? |
-|:----------|:---------------|:--------------------|
-| SIGKILL + process teardown | ~1s | No |
-| `uv` environment resolution | ~1-2s | Python-specific |
-| Python interpreter startup | ~1s | Python-specific |
-| Model weight loading (SSD → Metal) | **~15-25s** | **No** |
-| Health check polling (500ms intervals) | ~1-3s | No |
+**Root cause breakdown — Experiment E1 data (`benchmarks/swap_latency.csv`):**
+
+| Scenario | SIGKILL | Python startup | Weight loading | **Total** | Python % |
+|:---------|:--------|:--------------|:---------------|:----------|:---------|
+| Hot cache (filesystem warm, 2026-04-06) | ~50ms | ~202ms | 3–103ms | **258–357ms** | **57–79%** |
+| Cold cache (filesystem evicted, 2026-04-07) | ~50ms | ~202ms | 1,626–3,553ms | **1,877–3,807ms** | **5–11%** |
+
+> [!IMPORTANT]
+> **Hot cache**: Python startup (~200ms) dominates — accounts for 57–79% of total swap time. Weight loading is negligible because MLX mmap's safetensors that are already in macOS filesystem cache.
+>
+> **Cold cache**: Weight loading dominates (1.6–3.6s). Python overhead drops to 5–11% of total. On the 24GB M5 with only ~2GB free RAM and 4.6GB pinned by Hermes-3-8B, filesystem cache is routinely evicted by browser tabs and other apps. **Cold swaps are the norm, not the exception.**
 
 > [!WARNING]
-> The dominant cost is **weight loading**, which is language-independent. Rewriting in Swift eliminates ~2-4s of Python overhead but does not address the 15-25s core bottleneck. **Run Experiment E1 before committing to any language migration.**
+> **Phase 16 Go/No-Go (as of 2026-04-07): NO-GO.** E1 cold-cache data shows Python overhead is 5–11% of total swap time — well below the 30% threshold required to greenlight Swift migration. The dominant cost is weight loading, which is language-independent. Swift migration would save ~200ms on a 1,877–3,807ms operation: <10% reduction. See Phase 22 remaining items in TASKS.md for the corrected analysis task.
 
 #### Candidate Solutions
 
@@ -210,6 +213,53 @@
 **Was:** `HandleModelSwap` called `SwitchModel()` which holds `swapMu.Lock()` — blocking indefinitely if another swap was already running. Callers had no way to detect this; they would hang for the full 20-30s swap duration.
 
 **Fix applied:** Added `TrySwitchModel()` to `ProcessManager` using `swapMu.TryLock()`. If a swap is already running, `HandleModelSwap` returns HTTP 409 with a message directing the caller to poll `/system/maintenance/status` and retry. `HandleCompletions`-initiated implicit swaps still use the blocking `SwitchModel()` (correct — those requests should wait for the current swap to finish before proxying).
+
+---
+
+### L10: Unified Memory Pressure — Non-Compressible Metal Allocations ⬆️ HIGH (Mac Freeze Risk)
+
+**Current state:** `mlx_lm.server` (pid 974) holds **~4.6 GB RSS** for Hermes-3-8B-4bit. These are MLX Metal-backed buffers allocated via the macOS Metal API. Unlike anonymous pages, Metal allocations are **not compressible** by macOS — the kernel cannot page them out or shrink them under memory pressure.
+
+**Observed state (2026-04-07):** 24GB M5 with Hermes-3-8B running:
+- Free: ~2.1 GB (drops rapidly when browser opens new tabs)
+- Wired: ~2.2 GB (kernel, I/O, non-pageable)
+- Active: ~9.3 GB (processes including MLX)
+- Inactive: ~8.6 GB (filesystem cache, purgeable)
+
+**Impact:** When Roy opens browsers, Electron apps, or other memory-hungry processes, the system pushes past ~22GB total committed. macOS begins aggressively compressing anonymous pages. Because Metal buffers cannot be reclaimed, the kernel has no relief valve — this causes UI hangs, beachballs, and in severe cases kernel panics (especially during model swaps when VRAM pressure spikes).
+
+**Root cause of Mac freezing:** MLX + browser + Electron apps → total committed memory exceeds 24GB → kernel compressor overloaded → UI thread starves → freeze.
+
+#### Immediate Mitigations (no code required)
+
+- Close memory-heavy apps (Chrome/Firefox tabs, VS Code, etc.) before running inference sessions
+- Use Safari instead of Chromium-based browsers (significantly lower memory footprint)
+- Monitor: `watch -n2 "vm_stat | grep 'Pages free'"` — if free pages < 60,000 (~1GB), close tabs
+- Do not run `llm-factory` training while other apps are open — training is even more VRAM-intensive
+
+#### Candidate Solutions
+
+**A. Memory Pressure Monitoring Endpoint** → TASKS Phase 23
+| | |
+|:--|:--|
+| **Approach** | Add `/system/memory` endpoint to EHC; poll `vm_stat`; return pressure level (normal/warn/critical) |
+| **Pros** | Zero Python dependency; warns before the freeze happens; clients can back off proactively |
+| **Cons** | Reactive — doesn't actually free memory |
+
+**B. macOS Memory Pressure Notification Hook** → TASKS Phase 23
+| | |
+|:--|:--|
+| **Approach** | Subscribe to `DISPATCH_SOURCE_TYPE_MEMORYPRESSURE` via CGo or `memory_pressure` binary; auto-enter maintenance mode on CRITICAL |
+| **Pros** | Proactive; EHC reacts before user sees freeze |
+| **Cons** | Requires CGo or polling subprocess; adds complexity |
+
+**C. Reduce Prompt Cache Size** → Immediate (config change)
+| | |
+|:--|:--|
+| **Approach** | Reduce `--prompt-cache-size 2048` to `512` or `256` in `manager.go` |
+| **Pros** | Frees KV cache memory; meaningful reduction in MLX memory footprint |
+| **Cons** | Slower multi-turn inference (more tokens re-processed per turn) |
+| **Assessment** | Try 512 first. Measure TTFT difference. Multi-turn agentic use cases need this trade-off evaluated. |
 
 ---
 

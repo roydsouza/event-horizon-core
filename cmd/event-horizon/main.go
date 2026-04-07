@@ -21,7 +21,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := pm.Start(ctx); err != nil {
+	if _, _, err := pm.Start(ctx); err != nil {
 		log.Fatalf("[Main] Failed to start supervisor: %v", err)
 	}
 

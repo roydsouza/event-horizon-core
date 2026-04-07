@@ -155,16 +155,86 @@
 
 ---
 
+## 🖥️ Memory Pressure & Freeze Prevention
+
+### S12: Prompt Cache Size Reduction `[IMPLEMENTED — 2026-04-07]`
+*Solved: L10 (Unified Memory Pressure — partial)*
+
+| Property | Details |
+|:---|:---|
+| **Change** | `--prompt-cache-size 2048` → `512` in `manager.go` |
+| **Effect** | Reduces the KV cache Metal allocation. Smaller footprint for single-turn and short multi-turn workloads. |
+| **Trade-off** | Slower multi-turn inference when conversation history exceeds 512 tokens — more tokens re-processed per turn. For current single-turn usage pattern this is acceptable. Re-evaluate when multi-agent chained sessions become the norm. |
+| **Result** | ~Several hundred MB freed from pinned Metal pool; MLX server restarted with new setting. |
+
+---
+
+### S13: Idle Model Unloading `[PROPOSED — MEDIUM-TERM]`
+*Proposed to solve: L10 (Unified Memory Pressure)*
+
+| Property | Details |
+|:---|:---|
+| **Concept** | After N seconds of no inference requests, the supervisor sends SIGKILL to `mlx_lm.server` and releases the ~4.6 GB Metal allocation back to the unified memory pool. On the next request, EHC restarts the model (cold-swap: 1.9–3.8s). |
+| **Pros** | Frees the entire ~4.6 GB Metal allocation during idle periods — the most impactful memory reduction possible without changing hardware. macOS can use that memory for browser tabs, compressor, file cache. |
+| **Cons** | Cold-start penalty on first request after idle period (1.9–3.8s). Unacceptable for interactive agents; fine for batch/offline workloads. Could be made configurable per use case. |
+| **Implementation** | Add `lastRequestTime time.Time` to `EventHorizonServer`. Background goroutine checks every 30s; calls `pm.Stop()` if idle > threshold. On next request: detect `pm.GetStatus() == StatusStopped`, call `pm.Start()`, then proxy. |
+| **Config** | `EHC_IDLE_TIMEOUT_SECONDS=300` env var (0 = disabled, default). |
+| **When to implement** | Phase 23 — after memory pressure monitoring endpoint lands, so we have telemetry to confirm the improvement. |
+
+---
+
+### S14: macOS Memory Pressure Hook `[PROPOSED — MEDIUM-TERM]`
+*Proposed to solve: L10 (Unified Memory Pressure)*
+
+| Property | Details |
+|:---|:---|
+| **Concept** | Subscribe to macOS `DISPATCH_SOURCE_TYPE_MEMORYPRESSURE` events via CGo (or poll `memory_pressure` binary). On WARN: log loudly and refuse new swap requests. On CRITICAL: auto-enter maintenance mode, optionally unload model. |
+| **Pros** | Proactive — reacts before the freeze happens rather than after. No polling overhead; kernel pushes events. |
+| **Cons** | Requires CGo to access Dispatch API — adds a macOS-only build dependency. Alternatively, poll `memory_pressure` binary every 10s (simpler, slightly delayed). |
+| **Phase** | Phase 23 |
+
+---
+
+### S15: `/system/memory` Endpoint `[PROPOSED — NEAR-TERM]`
+*Proposed to solve: L10 (Unified Memory Pressure)*
+
+| Property | Details |
+|:---|:---|
+| **Concept** | Pure-Go endpoint that parses `vm_stat` output and returns structured memory pressure data. |
+| **Response** | `{"free_mb": N, "wired_mb": N, "inactive_mb": N, "compressed_mb": N, "pressure": "normal\|warn\|critical"}` |
+| **Thresholds** | warn: free_mb < 2048; critical: free_mb < 1024 |
+| **Pros** | Zero Python dependency; `vm_stat` is always available on macOS; useful for dashboards and automated scripts. |
+| **Phase** | Phase 23 — implement this first (simplest, highest immediate value) |
+
+---
+
+### S16: Agent Identity & Per-Client Routing `[PROPOSED — PHASE 24]`
+*Proposed to solve: Future multi-model routing, observability, firewall interception*
+
+| Property | Details |
+|:---|:---|
+| **Concept** | All clients send `X-Agent-Name` header. EHC maintains a config-file routing table (agent → model pin). Per-agent metrics tracked in a `sync.Map`. Optional per-agent firewall interception hook. |
+| **Design** | Full spec in [ROADMAP R8](ROADMAP.md#r8-agent-identity-per-client-routing--firewall-interception) |
+| **Convention adopted now** | `X-Agent-Name` documented as required in `INTEGRATION.md`, `~/antigravity/CLAUDE.md`, and all `docs/clients/` setup guides (Phase 24 retrofit task). |
+| **Phase** | Phase 24 — after R5 (structured observability with `slog`) |
+
+---
+
 ## 📝 Archives & Histograph
 
 > *Design decisions and retired solutions.*
 
 | Date | ID | Status | Note |
 |:---|:---|:---|:---|
+| 2026-04-07 | S12 | `[IMPLEMENTED]` | Prompt cache reduction 2048→512 — frees Metal memory; restart confirmed. |
+| 2026-04-07 | S13 | `[PROPOSED]` | Idle model unloading — frees 4.6 GB Metal on idle; cold-start penalty accepted. |
+| 2026-04-07 | S14 | `[PROPOSED]` | macOS memory pressure hook — proactive freeze prevention via Dispatch events. |
+| 2026-04-07 | S15 | `[PROPOSED]` | `/system/memory` endpoint — vm_stat parsed in Go; pressure level exposed. |
+| 2026-04-07 | S16 | `[PROPOSED]` | Agent identity + routing table + per-agent metrics — Phase 24. |
 | 2026-04-06 | S6 | `[IMPLEMENTED]` | Metrics TTL cache — eliminates subprocess churn under monitoring. |
 | 2026-04-06 | S7 | `[IMPLEMENTED]` | SSE-aware proxy — fixes OpenFang streaming TTFT. |
 | 2026-04-06 | S8 | `[IMPLEMENTED]` | In-flight drain — maintenance mode now actually drains requests. |
 | 2026-04-06 | S9 | `[IMPLEMENTED]` | TrySwitchModel — /v1/model/swap returns 409 on contention. |
 | 2026-04-06 | S5 | `[REJECTED]` | MTLHeap virtualization — high complexity, low ROI vs. LoRA. |
-| 2026-04-01 | S12 | `[RETIRED]` | Removed Ollama/Llama.cpp providers to focus on MLX performance. |
-| 2026-03-31 | S13 | `[RETIRED]` | Python-only orchestrator (replaced by Go daemon). |
+| 2026-04-01 | S-ret1 | `[RETIRED]` | Removed Ollama/Llama.cpp providers to focus on MLX performance. |
+| 2026-03-31 | S-ret2 | `[RETIRED]` | Python-only orchestrator (replaced by Go daemon). |

@@ -12,7 +12,7 @@ This is a **primary, actively developed project**. It is the shared infrastructu
 
 - **Language:** Go (daemon/substrate) + Python (thin-client via `uv`)
 - **Target:** Apple Silicon M5, 24GB Unified Memory, Metal GPU
-- **Inference:** MLX (local, Metal-accelerated) + OpenRouter (cloud fallback)
+- **Inference:** MLX (local, Metal-accelerated) — **local-only since Phase 10; OpenRouter removed**
 - **Transport:** Local HTTP (Port 8000), `launchd` managed service
 - **Build:** `go build`, `uv run`
 

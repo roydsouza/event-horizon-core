@@ -66,16 +66,12 @@
 
 ---
 
-### R2: Measure the Cold-Start Bottleneck ⏱️ NEXT
+### R2: Measure the Cold-Start Bottleneck ✅ COMPLETE (E1 data collected, Phase 16 NO-GO)
 
 > **Limitations addressed:** [L1](LIMITATIONS.md#l1-cold-start-model-swap-latency)  
 > **Experiment:** [E1](LIMITATIONS.md#e1-cold-start-breakdown-measurement)
 
-Before investing in MLX-Swift (Phase 16), instrument `manager.go` to measure the actual time breakdown of a model swap. This determines whether the highest-leverage fix is:
-
-- **If Python overhead > 30%:** MLX-Swift migration has high value → proceed to R4
-- **If weight loading > 85%:** Language doesn't matter → pivot to mmap persistence or pre-warming
-- **If health polling > 20%:** Reduce poll interval from 500ms to 100ms (trivial fix)
+E1 instrumentation delivered. Key finding: cold-cache swaps (the real-world case on the 24GB M5) show Python overhead at only 5–11%, well below the 30% Swift migration gate. Weight loading (1.6–3.6s) dominates. **Phase 16 gate is NO-GO.** See LIMITATIONS.md L1 for full two-scenario table.
 
 ---
 
@@ -169,6 +165,99 @@ Deferred until:
 
 ---
 
+### R8: Agent Identity, Per-Client Routing & Firewall Interception ⏱️ DEFERRED — DESIGN DECIDED
+
+> **Origin:** Roy (2026-04-07). Design settled; implementation deferred until Shapeshifter-Airlock Phase 4 complete.
+
+#### The Problem
+
+EHC is currently a transparent proxy with no awareness of *who* is calling or *what policies* apply. As the fleet grows (ZeroClaw, OpenFang, HermesAgent, Shapeshifter-Airlock firewall, llm-proving-ground, llm-factory), requests are indistinguishable. This prevents per-client routing, per-client metrics, and centralized policy enforcement.
+
+#### The Design (Hybrid, Two Trust Levels)
+
+**All callers** must send `X-Agent-Name: <name>` on every request. This is the mandatory identity primitive.
+
+**Trust Level 1 — Station agents** (Claws, firewall): declare identity only; model is resolved by EHC from a routing table. No admin token required. Cannot change their own model pin.
+
+```
+POST /v1/chat/completions
+X-Agent-Name: zeroclaw
+{ "messages": [...] }          # no "model" field needed
+
+→ EHC looks up routing table → finds pin for "zeroclaw" → proxies to that model
+→ If no pin: use station default (currently Hermes-3-8B)
+```
+
+**Trust Level 2 — Infrastructure callers** (llm-proving-ground, llm-factory): hold admin token; always pass both identity AND explicit model. Route through maintenance API, not the completions path. Can override any pin.
+
+```
+POST /system/maintenance        X-EHC-Admin-Token: <token>
+POST /v1/model/swap             X-EHC-Admin-Token: <token>
+POST /v1/chat/completions       X-Agent-Name: llm-proving-ground
+  { "model": "mlx-community/Qwen2.5-14B-4bit", "messages": [...] }
+```
+
+#### Routing Table (config-driven, not hardcoded)
+
+Lives in `config.toml` at the project root. No code change to add a new pin.
+
+```toml
+[routing]
+default_model = "mlx-community/Hermes-3-Llama-3.1-8B-4bit"
+
+[routing.pins]
+# zeroclaw = "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"   # when ready
+# shapeshifter-firewall = "mlx-community/Llama-3.2-3B-Instruct-4bit"  # lighter model for firewall
+# all unregistered agents fall through to default_model
+```
+
+#### Per-Agent Metrics
+
+EHC accumulates per-agent stats in a Go `sync.Map` (in-memory, lost on restart — persistent storage comes later):
+
+```json
+GET /metrics/agents
+{
+  "zeroclaw":   { "requests": 142, "tokens_out": 18420, "avg_ttft_ms": 312, "last_model": "..." },
+  "hermes":     { "requests":  38, "tokens_out":  5100, "avg_ttft_ms": 287, "last_model": "..." }
+}
+```
+
+This feeds Phase 14 (Goodness Framework) and eventual scheduler intelligence.
+
+#### Firewall Interception (inline, optional per-agent)
+
+When Shapeshifter-Airlock Phase 4 (Semantic Firewall) is ready, EHC can optionally call the firewall before proxying:
+
+```
+Claw → EHC → [firewall check, <100ms budget] → MLX backend
+              ↓ block?
+              403 back to Claw
+```
+
+Config-driven: `routing.pins.zeroclaw.firewall_endpoint = "http://127.0.0.1:XXXX/check"`. Bypass with `routing.pins.zeroclaw.firewall_bypass = true` for development.
+
+**Latency budget:** Firewall check must complete in <100ms (async timeout in Go). If it times out, EHC logs a warning and proxies anyway (fail-open). Roy can flip to fail-closed if the firewall matures.
+
+#### On llm-proving-ground Harness Strategy
+
+Use **both**, for different purposes:
+- **EHC maintenance API** → production-representative benchmarks (real MLX stack, real memory constraints, real Go proxy overhead). This is what Phase 18 enables. Results reflect what the model will actually do in production.
+- **Isolated harness** → stress tests, OOM scenarios, crash recovery, concurrency torture. Don't run these against the production daemon.
+
+#### Dependencies
+
+- `X-Agent-Name` header: all Claw client guides need updating (docs/clients/)
+- Routing table: requires config file parsing in `cmd/event-horizon/main.go`
+- Firewall interception: requires Shapeshifter-Airlock Phase 4 complete
+- Per-agent metrics: requires R5 (structured observability) first — `slog` request IDs needed to correlate
+
+#### When to Revisit
+
+After Shapeshifter-Airlock Phase 3 (Network Eye) is complete and Roy has decided whether the firewall should be inline (blocking) or out-of-band (observe-only). The `X-Agent-Name` header convention should be adopted by all new Claws starting now — cheap to add, expensive to retrofit later.
+
+---
+
 ### R7: Python Pre-warming (Contingency) ⏱️ IF NEEDED
 
 > **Limitations addressed:** [L1](LIMITATIONS.md#l1-cold-start-model-swap-latency)  
@@ -187,6 +276,8 @@ This is the "known solution" — dual Python processes, atomic port swap. It wor
 
 | Date | Decision | Rationale | Ref |
 |:-----|:---------|:----------|:----|
+| 2026-04-07 | Phase 16 (MLX-Swift) is NO-GO based on E1 cold-cache data | Cold-cache Python overhead is 5–11% of total swap time — below the 30% gate. Swift migration saves ~200ms on a 3.8s operation. Not worth the ecosystem risk. | R2, L1 |
+| 2026-04-07 | Agent identity (`X-Agent-Name`) + config routing table + per-agent metrics as R8 | Hybrid: agents declare identity only; infrastructure callers hold admin token + explicit model. Firewall interception inline when SA Phase 4 ready. Convention starts now on new clients. | R8 |
 | 2026-04-06 | Fix production bugs before any architectural migration | SSE streaming, metrics churn, drain race, 409 contention — all fixed. These are cheaper than any rewrite and remove known failure modes. | R1 |
 | 2026-04-06 | Gate MLX-Swift behind E1 measurement and 48h spike | Avoid multi-week investment without empirical evidence. Weight loading is language-independent; Python overhead may be <15% of total swap time. | [REVIEW_04_06.md](REVIEW_04_06.md) LLM3, R4 |
 | 2026-04-06 | Keep Go as orchestrator regardless of inference backend | Proven battle-tested code; Swift-NIO rewrite is high risk with no benefit over Go for orchestration. Backend changes happen underneath the Go layer. | [REVIEW_04_06.md](REVIEW_04_06.md) LLM3 |
