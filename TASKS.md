@@ -76,9 +76,9 @@
     - Captures: vllm-mlx, mlx_lm upstream bug status, multi-instance pool, vLLM sleep mode, aLoRA
     - Flags known mlx_lm.server concurrency bugs (KV contamination #965, kernel panic #883)
     - Includes open research questions and a preliminary recommendation order
-- [ ] **Verify upstream mlx_lm bug status**: Check if #965, #754, #883 are fixed in current
-    `pip install mlx_lm`. If fixed, no backend change needed. Run: `uv run pip show mlx_lm`
-    and check its changelog against the issue numbers.
+- [ ] **Verify upstream mlx_lm bug status**: Check if #965, #754, #883 are fixed in the
+    current pinned version. If fixed, no backend change needed. Run: `uv run python -m mlx_lm --version`
+    or `uv pip show mlx-lm` and check the changelog against the issue numbers.
 - [ ] **Operator reviews** `docs/research/MLX_MULTIPLEXING_OPTIONS.md` and decides direction
 - [ ] **Implement chosen direction** (TBD — see research doc)
 
