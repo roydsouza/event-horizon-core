@@ -7,10 +7,32 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
+
+type MemoryPressure string
+
+const (
+	PressureNormal   MemoryPressure = "normal"
+	PressureWarn     MemoryPressure = "warn"
+	PressureCritical MemoryPressure = "critical"
+)
+
+type MemoryStats struct {
+	FreeMB       int64          `json:"free_mb"`
+	SpeculativeMB int64          `json:"speculative_mb"`
+	InactiveMB   int64          `json:"inactive_mb"`
+	ActiveMB     int64          `json:"active_mb"`
+	WiredMB      int64          `json:"wired_mb"`
+	CompressedMB int64          `json:"compressed_mb"`
+	TotalFreeMB  int64          `json:"total_free_mb"`
+	Pressure     MemoryPressure `json:"pressure"`
+}
 
 type ServerStatus string
 
@@ -208,6 +230,18 @@ func (pm *ProcessManager) doSwitch(ctx context.Context, newModelPath string) err
 	}
 
 	log.Printf("[Supervisor] Hot-Swapping Model: %s -> %s", current, newModelPath)
+
+	// Phase 23: Check memory pressure before committing to a swap.
+	stats, err := GetMemoryStats()
+	if err == nil {
+		if stats.Pressure == PressureCritical {
+			return fmt.Errorf("ABORTING SWAP: Critical memory pressure (%d MB free). Close other apps to prevent system freeze", stats.TotalFreeMB)
+		}
+		if stats.Pressure == PressureWarn {
+			log.Printf("[WARNING] High memory pressure detected (%d MB free). Proceeding, but system may lag", stats.TotalFreeMB)
+		}
+	}
+
 	killStart := time.Now()
 
 	exitTime, err := pm.StopWithTime()
@@ -290,4 +324,54 @@ func (pm *ProcessManager) GetStatus() ServerStatus {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.status
+}
+
+func GetMemoryStats() (MemoryStats, error) {
+	out, err := exec.Command("vm_stat").Output()
+	if err != nil {
+		return MemoryStats{}, err
+	}
+
+	stats := MemoryStats{Pressure: PressureNormal}
+	lines := strings.Split(string(out), "\n")
+	pageSize := int64(16384) // Default for Apple Silicon
+
+	re := regexp.MustCompile(`^([^:]+):\s+(\d+)\.`)
+
+	for _, line := range lines {
+		matches := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) < 3 {
+			continue
+		}
+
+		label := matches[1]
+		val, _ := strconv.ParseInt(matches[2], 10, 64)
+		mb := (val * pageSize) / 1024 / 1024
+
+		switch label {
+		case "Pages free":
+			stats.FreeMB = mb
+		case "Pages speculative":
+			stats.SpeculativeMB = mb
+		case "Pages inactive":
+			stats.InactiveMB = mb
+		case "Pages active":
+			stats.ActiveMB = mb
+		case "Pages wired down":
+			stats.WiredMB = mb
+		case "Pages stored in compressor":
+			stats.CompressedMB = mb
+		}
+	}
+
+	stats.TotalFreeMB = stats.FreeMB + stats.SpeculativeMB
+
+	// Thresholds based on LIMITATIONS.md L10
+	if stats.TotalFreeMB < 1024 {
+		stats.Pressure = PressureCritical
+	} else if stats.TotalFreeMB < 2048 {
+		stats.Pressure = PressureWarn
+	}
+
+	return stats, nil
 }

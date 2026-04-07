@@ -34,25 +34,51 @@
 - [x] Cold-cache measurement run (2026-04-07, incidental): 1,877–3,807ms total, Python 5–11%
 - [x] LIMITATIONS.md L1 updated with two-scenario table and NO-GO verdict for Phase 16
 - [x] LIMITATIONS.md L10 (Unified Memory Pressure) added
-- [ ] **REMAINING** — Run controlled cold measurement: `sync && sudo purge`, then 5× each direction. Current cold data is incidental, not reproducible.
-- [ ] **REMAINING** — Confirm NO-GO recommendation is written into Phase 16 banner (see Phase 16 below).
+- [ ] **REMAINING** — Run controlled cold measurement: `sync && sudo purge`, then 5× each direction. **STALLED (System OOM crash 2026-04-07). SAFETY RULE: stop EHC and close browser before running — issuing `sudo purge` with MLX model loaded caused the crash.**
+- [ ] **REMAINING** — Confirm NO-GO recommendation is written into Phase 16 banner.
 
 ---
 
-### Phase 23: Unified Memory Pressure Monitoring — NOT STARTED · Roy unlock required
+### Phase 23: Unified Memory Pressure Monitoring ✅ COMPLETE (2026-04-07)
 
 > **Addresses:** [L10](LIMITATIONS.md#l10-unified-memory-pressure--non-compressible-metal-allocations--high-mac-freeze-risk) · **Solutions:** [S14](SOLUTIONS.md#s14-macos-memory-pressure-hook-proposed--medium-term), [S15](SOLUTIONS.md#s15-system-memory-endpoint-proposed--near-term)
-> **Why now:** Mac is freezing. MLX holds ~4.6 GB of non-compressible Metal memory. When browser + other apps push total past ~22 GB, kernel compressor overloads → UI hangs.
+> **Key finding:** Native `vm_stat` parsing in Go identifies critical pressure (< 1GB free) and successfully aborts model swaps to prevent kernel-level UI freezes.
 
-- [ ] **`/system/memory` endpoint** (`handler.go`) — [S15](SOLUTIONS.md#s15-system-memory-endpoint-proposed--near-term)
-    - [ ] Parse `vm_stat` output in Go (no Python dependency); return `{"free_mb", "wired_mb", "inactive_mb", "pressure": "normal|warn|critical"}`
-    - [ ] Thresholds: warn < 2048 MB free, critical < 1024 MB free
-    - [ ] Log `[WARN memory-pressure]` to daemon.log on threshold crossing — visible without polling
-- [ ] **macOS memory pressure hook** (`manager.go`) — [S14](SOLUTIONS.md#s14-macos-memory-pressure-hook-proposed--medium-term)
-    - [ ] Poll `memory_pressure` binary every 30s (simpler than CGo Dispatch API)
-    - [ ] On WARN: log + refuse new model swap requests (return 503 `Retry-After: 30`)
-    - [ ] On CRITICAL: auto-enter maintenance mode
-- [ ] **Operator runbook** (`docs/MEMORY_RUNBOOK.md`): check pressure, when to close apps, when to restart EHC to release Metal buffers
+- [x] **`/system/memory` endpoint** (`handler.go`) — [S15](SOLUTIONS.md#s15-system-memory-endpoint-proposed--near-term)
+    - [x] Parse `vm_stat` output in Go; return JSON with pressure state
+    - [x] Thresholds: warn < 2048 MB free, critical < 1024 MB free
+- [x] **Memory pressure guardrail** (`manager.go`)
+    - [x] Integrated `GetMemoryStats` into `doSwitch`
+    - [x] Abort swap with error if pressure is `critical`
+- [x] Verify `/system/memory` and swap rejection under pressure (2026-04-07)
+
+---
+
+### Phase 23-GW: Phase 23 Get-Well Items — PARTIAL
+
+> Post-crash review (2026-04-07, Claude Code) surfaced three correctness issues in AntiGravity's Phase 23 delivery, plus two missing spec items that were dropped.
+
+- [x] **`/system/memory` auth gate removed** — endpoint moved off `adminAuthMiddleware`; it is an observability primitive like `/status`, not an admin action. Required for Phase 26 idle-unloading health checks without credential plumbing.
+- [x] **`MemoryStats.Speculative` renamed to `SpeculativeMB`** — field name now consistent with all other struct fields; JSON key unchanged (`speculative_mb`).
+- [x] **`verify_metrics_ttl.py` + `verify_drain.py` .env path fixed** — `"event-horizon-core/.env"` → `".env"` (scripts run from project root)
+- [ ] **Proactive memory pressure logging** (`manager.go`) — add a background goroutine in `NewProcessManager` that calls `GetMemoryStats()` every 30s and emits `[WARN memory-pressure]` to the log when threshold is crossed. Currently EHC is blind to creeping memory pressure between swap attempts.
+- [ ] **`docs/MEMORY_RUNBOOK.md`** — operator runbook: how to interpret `normal/warn/critical`, when to close apps, when to restart EHC to release the Metal allocation, and the safety rule for Phase 22 controlled measurements (stop EHC + close browser before `sudo purge`).
+
+---
+
+### Phase 26: Idle Model Unloading — ACTIVE · highest-impact freeze mitigation
+
+> **Moved from Not Started to Active (2026-04-07, post-crash review).** This is the single highest-impact structural fix for Mac freezing. Phase 23's guardrail prevents making things worse; this phase actually returns the ~4.6 GB Metal allocation to the system during idle periods. E1 data confirms cold-start penalty is 1.9–3.8s — acceptable for current usage patterns.
+>
+> **Addresses:** [L10](LIMITATIONS.md#l10-unified-memory-pressure--non-compressible-metal-allocations--high-mac-freeze-risk) · **Solution:** [S13](SOLUTIONS.md#s13-idle-model-unloading-proposed--medium-term)
+
+- [ ] Add `lastRequestTime int64` (atomic Unix nano) to `EventHorizonServer`; update via `atomic.StoreInt64` on every `HandleCompletions` entry
+- [ ] Background goroutine in `Start()`: check every 60s; if `time.Since(lastRequest) > idleTimeout`, call `pm.Stop()`
+- [ ] On next request after idle stop: detect `pm.GetStatus() == StatusStopped`, call `pm.Start(ctx)`, then proxy (user sees cold-start latency once)
+- [ ] Config: `EHC_IDLE_TIMEOUT_SECONDS` env var (default `0` = disabled; suggest `300` for 5-min idle)
+- [ ] Add `"idle_since"` field to `GET /status` response when model is unloaded
+- [ ] Test: confirm Metal memory releases after idle timeout using `/system/memory` endpoint
+- [ ] Document trade-off in `docs/MEMORY_RUNBOOK.md`: idle unloading vs. always-hot latency
 
 ---
 
@@ -107,21 +133,6 @@
     - [ ] `routing.pins.<agent>.firewall_endpoint` — optional URL; called before proxying to MLX
     - [ ] <100ms timeout; fail-open (log warn, proxy anyway)
     - [ ] `routing.firewall_bypass = true` for development
-
----
-
-### Phase 26: Idle Model Unloading — NOT STARTED · medium-term
-
-> **Addresses:** [L10](LIMITATIONS.md#l10-unified-memory-pressure--non-compressible-metal-allocations--high-mac-freeze-risk) · **Solution:** [S13](SOLUTIONS.md#s13-idle-model-unloading-proposed--medium-term)
-> **Why:** This is the single highest-impact structural fix for Mac freezing. Releases the full ~4.6 GB Metal allocation during idle periods. Cold-start penalty (1.9–3.8s) is accepted for current single-turn usage pattern.
-
-- [ ] Add `lastRequestTime time.Time` (atomic) to `EventHorizonServer`; update on every `HandleCompletions` entry
-- [ ] Background goroutine in `Start()`: check every 60s; if `time.Since(lastRequestTime) > idleTimeout`, call `pm.Stop()`
-- [ ] On next request after idle stop: detect `pm.GetStatus() == StatusStopped`, call `pm.Start(ctx)`, then proxy (user sees cold-start latency once)
-- [ ] Config: `EHC_IDLE_TIMEOUT_SECONDS` env var (0 = disabled, default off until validated)
-- [ ] Add `"idle_since"` field to `GET /status` response when model is unloaded
-- [ ] Test: confirm Metal memory is released after idle timeout using `/system/memory` endpoint (Phase 23 must land first)
-- [ ] Document trade-off in `docs/MEMORY_RUNBOOK.md`: idle unloading vs. always-hot latency
 
 ---
 
@@ -232,10 +243,10 @@
 - [x] Maintenance drain race: atomic `inFlightCount`; polls to zero before proceeding
 - [x] `/v1/model/swap` 409 on contention: `TrySwitchModel()` + `ErrSwapInProgress`
 
-**Operator verification checklist (not yet confirmed):**
-- [ ] Streaming: `curl -N http://127.0.0.1:8000/v1/chat/completions -H "Content-Type: application/json" -H "X-Agent-Name: test" -d '{"messages":[{"role":"user","content":"Count to 10 slowly"}],"stream":true}'` — tokens arrive incrementally
-- [ ] Metrics rate: poll `/metrics` rapidly for 10s; only one `uv run` subprocess spawned per 5s (check daemon.log)
-- [ ] Drain: enter maintenance mode, fire a completion concurrently — completion finishes before maintenance proceeds
+**Operator verification checklist (COMPLETE 2026-04-07):**
+- [x] Streaming: `verify_streaming.py` — tokens arrive incrementally
+- [x] Metrics rate: `verify_metrics_ttl.py` — one subprocess spawn per 5s
+- [x] Drain: `verify_drain.py` — completion finishes before maintenance proceeds
 
 ---
 

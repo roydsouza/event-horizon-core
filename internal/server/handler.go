@@ -62,6 +62,7 @@ func NewEventHorizonServer(pm *supervisor.ProcessManager, port int) *EventHorizo
 	s.mux.HandleFunc("/system/maintenance/status", s.adminAuthMiddleware(s.HandleMaintenanceStatus))
 	s.mux.HandleFunc("/v1/model/swap", s.adminAuthMiddleware(s.HandleModelSwap))
 	s.mux.HandleFunc("/metrics", s.adminAuthMiddleware(s.HandleMetrics))
+	s.mux.HandleFunc("/system/memory", s.HandleMemory)
 
 	return s
 }
@@ -402,4 +403,20 @@ func (s *EventHorizonServer) HandleMetrics(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(out)
+}
+
+func (s *EventHorizonServer) HandleMemory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stats, err := supervisor.GetMemoryStats()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch memory stats: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
