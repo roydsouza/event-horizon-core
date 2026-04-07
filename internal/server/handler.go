@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,12 @@ type EventHorizonServer struct {
 	inFlightCount int64 // accessed via sync/atomic
 
 	metrics metricsCache
+
+	// Idle unloading (Phase 26). Both fields are Unix nanoseconds accessed atomically.
+	// lastRequestNano: timestamp of the most recent HandleCompletions entry (0 = never).
+	// idleSince: timestamp when the model was unloaded due to idle timeout (0 = not idle).
+	lastRequestNano int64
+	idleSince       int64
 }
 
 func NewEventHorizonServer(pm *supervisor.ProcessManager, port int) *EventHorizonServer {
@@ -70,7 +77,71 @@ func NewEventHorizonServer(pm *supervisor.ProcessManager, port int) *EventHorizo
 func (s *EventHorizonServer) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("[Server] Event Horizon Daemon listening on %s", addr)
+	go s.pressureMonitor()
+	go s.idleMonitor()
 	return http.ListenAndServe(addr, s.mux)
+}
+
+// pressureMonitor logs transitions between memory pressure states every 30s.
+// Operators can watch daemon.log for [WARN memory-pressure] lines without polling
+// /system/memory. Only logs on state changes to avoid spamming the log.
+func (s *EventHorizonServer) pressureMonitor() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	last := supervisor.PressureNormal
+	for range ticker.C {
+		stats, err := supervisor.GetMemoryStats()
+		if err != nil {
+			continue
+		}
+		if stats.Pressure == last {
+			continue
+		}
+		switch stats.Pressure {
+		case supervisor.PressureWarn:
+			log.Printf("[WARN memory-pressure] Elevated: %d MB free (warn threshold: 2048 MB). Consider closing browser tabs before any model swap.", stats.TotalFreeMB)
+		case supervisor.PressureCritical:
+			log.Printf("[WARN memory-pressure] CRITICAL: %d MB free (critical threshold: 1024 MB). Model swaps will be aborted until pressure drops.", stats.TotalFreeMB)
+		case supervisor.PressureNormal:
+			log.Printf("[INFO memory-pressure] Returned to normal: %d MB free.", stats.TotalFreeMB)
+		}
+		last = stats.Pressure
+	}
+}
+
+// idleMonitor unloads the MLX model after EHC_IDLE_TIMEOUT_SECONDS of inactivity,
+// releasing ~4.6 GB of non-compressible Metal memory. Disabled when the env var is
+// unset or 0. On the next request after an idle unload, HandleCompletions calls
+// EnsureRunning to restart the model (cold-start penalty: 1.9–3.8s per E1 data).
+func (s *EventHorizonServer) idleMonitor() {
+	timeoutSec, err := strconv.ParseInt(os.Getenv("EHC_IDLE_TIMEOUT_SECONDS"), 10, 64)
+	if err != nil || timeoutSec <= 0 {
+		log.Printf("[Server] Idle unloading disabled (set EHC_IDLE_TIMEOUT_SECONDS>0 to enable)")
+		return
+	}
+	idleTimeout := time.Duration(timeoutSec) * time.Second
+	log.Printf("[Server] Idle unloading enabled: model unloads after %v of inactivity", idleTimeout)
+
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		last := atomic.LoadInt64(&s.lastRequestNano)
+		if last == 0 {
+			continue // no requests yet
+		}
+		if s.supervisor.GetStatus() != supervisor.StatusRunning {
+			continue // already stopped or in a transition
+		}
+		if time.Since(time.Unix(0, last)) > idleTimeout {
+			log.Printf("[Server] Model idle for >%v. Unloading to release Metal memory (~4.6 GB).", idleTimeout)
+			if err := s.supervisor.IdleUnload(); err != nil {
+				log.Printf("[Server] Idle unload failed: %v", err)
+				continue
+			}
+			atomic.StoreInt64(&s.idleSince, time.Now().UnixNano())
+			log.Printf("[Server] Model unloaded. Poll /system/memory to confirm Metal memory released.")
+		}
+	}
 }
 
 func (s *EventHorizonServer) HandleStatus(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +153,11 @@ func (s *EventHorizonServer) HandleStatus(w http.ResponseWriter, r *http.Request
 	mSince := s.maintenanceSince
 	s.maintMu.RUnlock()
 
+	var idleSinceStr interface{}
+	if n := atomic.LoadInt64(&s.idleSince); n != 0 {
+		idleSinceStr = time.Unix(0, n).UTC().Format(time.RFC3339)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":                   status,
@@ -91,6 +167,7 @@ func (s *EventHorizonServer) HandleStatus(w http.ResponseWriter, r *http.Request
 		"maintenance_requested_by": mReqBy,
 		"maintenance_since":        mSince,
 		"active_model":             s.supervisor.CurrentModel(),
+		"idle_since":               idleSinceStr,
 	})
 }
 
@@ -108,6 +185,19 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 			"retry_after": 60,
 		})
 		return
+	}
+
+	// Record for idle timeout tracking.
+	atomic.StoreInt64(&s.lastRequestNano, time.Now().UnixNano())
+
+	// If model was unloaded by idle timeout, restart it before serving.
+	if s.supervisor.GetStatus() == supervisor.StatusStopped {
+		log.Printf("[Server] Model was idle-unloaded. Restarting for incoming request...")
+		if err := s.supervisor.EnsureRunning(context.Background()); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to restart idle model: %v", err), http.StatusServiceUnavailable)
+			return
+		}
+		atomic.StoreInt64(&s.idleSince, 0)
 	}
 
 	// Count this request as in-flight so HandleMaintenance can drain properly.

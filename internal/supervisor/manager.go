@@ -284,6 +284,38 @@ func (pm *ProcessManager) Stop() error {
 	return err
 }
 
+// IdleUnload stops the MLX server to release Metal memory after an idle timeout.
+// Serialized through swapMu so it cannot race with EnsureRunning.
+func (pm *ProcessManager) IdleUnload() error {
+	pm.swapMu.Lock()
+	defer pm.swapMu.Unlock()
+	return pm.Stop()
+}
+
+// EnsureRunning starts the MLX server if it was stopped by an idle timeout, then
+// waits until it is healthy. If a start is already in progress (another goroutine
+// won the race), it waits for that start to complete. No-op if already running.
+func (pm *ProcessManager) EnsureRunning(ctx context.Context) error {
+	pm.swapMu.Lock()
+	defer pm.swapMu.Unlock()
+
+	pm.mu.RLock()
+	status := pm.status
+	pm.mu.RUnlock()
+
+	switch status {
+	case StatusRunning:
+		return nil
+	case StatusStarting:
+		// Another goroutine is already starting; wait for it to become healthy.
+		_, _, err := pm.WaitUntilHealthy(ctx)
+		return err
+	default: // StatusStopped, StatusError
+		_, _, err := pm.Start(ctx)
+		return err
+	}
+}
+
 func (pm *ProcessManager) StopWithTime() (time.Time, error) {
 	if pm.cmd == nil || pm.cmd.Process == nil {
 		return time.Now(), nil

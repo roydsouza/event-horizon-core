@@ -61,8 +61,8 @@
 - [x] **`/system/memory` auth gate removed** — endpoint moved off `adminAuthMiddleware`; it is an observability primitive like `/status`, not an admin action. Required for Phase 26 idle-unloading health checks without credential plumbing.
 - [x] **`MemoryStats.Speculative` renamed to `SpeculativeMB`** — field name now consistent with all other struct fields; JSON key unchanged (`speculative_mb`).
 - [x] **`verify_metrics_ttl.py` + `verify_drain.py` .env path fixed** — `"event-horizon-core/.env"` → `".env"` (scripts run from project root)
-- [ ] **Proactive memory pressure logging** (`manager.go`) — add a background goroutine in `NewProcessManager` that calls `GetMemoryStats()` every 30s and emits `[WARN memory-pressure]` to the log when threshold is crossed. Currently EHC is blind to creeping memory pressure between swap attempts.
-- [ ] **`docs/MEMORY_RUNBOOK.md`** — operator runbook: how to interpret `normal/warn/critical`, when to close apps, when to restart EHC to release the Metal allocation, and the safety rule for Phase 22 controlled measurements (stop EHC + close browser before `sudo purge`).
+- [x] **Proactive memory pressure logging** (`handler.go`) — `pressureMonitor()` goroutine launched from `Start()`: polls every 30s, logs on state transitions only (no spam). `[WARN memory-pressure]` / `[INFO memory-pressure]` in daemon.log.
+- [x] **`docs/MEMORY_RUNBOOK.md`** — operator runbook: pressure state table, log indicators, freeze runbook, pre-benchmark checklist (stop EHC + close browser before `sudo purge`), Phase 26 trade-off table.
 
 ---
 
@@ -72,13 +72,13 @@
 >
 > **Addresses:** [L10](LIMITATIONS.md#l10-unified-memory-pressure--non-compressible-metal-allocations--high-mac-freeze-risk) · **Solution:** [S13](SOLUTIONS.md#s13-idle-model-unloading-proposed--medium-term)
 
-- [ ] Add `lastRequestTime int64` (atomic Unix nano) to `EventHorizonServer`; update via `atomic.StoreInt64` on every `HandleCompletions` entry
-- [ ] Background goroutine in `Start()`: check every 60s; if `time.Since(lastRequest) > idleTimeout`, call `pm.Stop()`
-- [ ] On next request after idle stop: detect `pm.GetStatus() == StatusStopped`, call `pm.Start(ctx)`, then proxy (user sees cold-start latency once)
-- [ ] Config: `EHC_IDLE_TIMEOUT_SECONDS` env var (default `0` = disabled; suggest `300` for 5-min idle)
-- [ ] Add `"idle_since"` field to `GET /status` response when model is unloaded
-- [ ] Test: confirm Metal memory releases after idle timeout using `/system/memory` endpoint
-- [ ] Document trade-off in `docs/MEMORY_RUNBOOK.md`: idle unloading vs. always-hot latency
+- [x] `lastRequestNano int64` + `idleSince int64` (atomic) added to `EventHorizonServer`; `lastRequestNano` updated on every `HandleCompletions` entry
+- [x] `idleMonitor()` goroutine in `Start()`: checks every 60s; calls `pm.IdleUnload()` if idle > timeout; `IdleUnload` serialized through `swapMu` to prevent race with `EnsureRunning`
+- [x] `EnsureRunning(ctx)` on `ProcessManager`: restarts stopped model; waits if already starting; no-op if running. Called from `HandleCompletions` when `StatusStopped` detected.
+- [x] Config: `EHC_IDLE_TIMEOUT_SECONDS` env var (default `0` = disabled; `300` = 5-min suggested)
+- [x] `"idle_since"` field in `GET /status` response (ISO8601 timestamp when unloaded, null otherwise)
+- [ ] **Operator test:** set `EHC_IDLE_TIMEOUT_SECONDS=60`, wait, confirm `/system/memory` shows ~4.6 GB freed; send a request, confirm cold-start, confirm `idle_since` clears
+- [x] Trade-off documented in `docs/MEMORY_RUNBOOK.md`
 
 ---
 
