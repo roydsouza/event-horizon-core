@@ -16,7 +16,8 @@
 | Frequency | Next Due | Task | Notes |
 |:----------|:---------|:-----|:------|
 | Weekly | 2026-04-12 | **Model cache audit** — `du -sh ~/.cache/huggingface/hub/models--* \| sort -rh`. Evict unused models, cross-check with `llm-proving-ground/reports/cache-manifest.md`. | Current inventory: see Model Cache section below |
-| Weekly | 2026-04-12 | **Gemma 4 26B A4B readiness check** — is `mlx-lm >= 0.32.x` on PyPI? Is PR #1112 closed? | `uv run python3 -c "from mlx_lm.models import gemma4; print('ready')"` |
+| Weekly | 2026-04-12 | **Default model evaluation** — is there a better single-model candidate than `Hermes-3-Llama-3.1-8B-4bit`? Primary candidate: Gemma 4 26B A4B (blocked on `mlx-lm >= 0.32.x` + PR #1112). Check readiness: `uv run python3 -c "from mlx_lm.models import gemma4; print('ready')"` | See Phase 13 for benchmark plan once ready |
+| Monthly | 2026-05-07 | **MLX multiplexing options re-evaluation** — update `docs/research/MLX_MULTIPLEXING_OPTIONS.md` with current state of mlx-lm, vllm-mlx, oMLX, vllm-metal; run any experiments needed; decide if hot-swap / multi-model strategy should be adopted. | Hot-swap deferred 2026-04-07; see Phase 15 for context |
 
 ---
 
@@ -82,17 +83,23 @@
 
 ---
 
-### Phase 15: Concurrency Correctness & Multiplexing Research — PARTIAL · Roy decision needed
+### Phase 15: Concurrency Correctness & Multiplexing Research ✅ COMPLETE (2026-04-07)
 
 > **Addresses:** [L2](LIMITATIONS.md#l2-single-model-residency) · **Research:** `docs/research/MLX_MULTIPLEXING_OPTIONS.md`
-> **Research updated 2026-04-07** — all open questions answered; see Decision Tree in the doc.
+>
+> **Strategic decision (2026-04-07):** Single-model strategy adopted. EHC serves one model
+> (Hermes-3-8B-4bit default) to ≤3 concurrent CLAW clients. Hot-swap and multi-model routing
+> are deferred until the ecosystem matures. Hot-swap code remains in place but is not exercised
+> in normal operation — station CLAWs omit the `model` field per EHC client convention.
+> `--prompt-concurrency 4` + `--decode-concurrency 4` reflect this intent explicitly.
+> **Re-evaluate monthly** (see Recurring Tasks).
 
 - [x] Fix hot-swap race condition in `ProcessManager` (`swapMu` + `mu` mutexes, commit 9ad2cbf)
 - [x] Document MLX multiplexing alternatives in `docs/research/MLX_MULTIPLEXING_OPTIONS.md`
-- [x] Verify upstream mlx_lm bug status (#965, #754, #883) — **#965 + #754 fixed in 0.31.2; #883 mitigated; #975 contested**
+- [x] Verify upstream mlx_lm bug status — #965 + #754 fixed in 0.31.2; #883 mitigated; #975 contested
 - [x] Research complete — all open questions answered (vllm-mlx, oMLX, vllm-metal, mlx.distributed, sleep mode)
-- [x] **Step 1 complete (2026-04-07):** `mlx-lm>=0.31.2,<0.32` in `pyproject.toml`; `--decode-concurrency 16` in `manager.go Start()`; `TestHighConcurrency` 5/5 PASS; multi-turn cache isolation PASS. Note: `--max-kv-size` is not a `mlx_lm.server` flag — #883 mitigation is avoiding 58K+ token contexts (not applicable to our usage).
-- [ ] **Step 2 (only if regressions emerge in production):** Evaluate vllm-mlx — benchmark TTFT delta from losing speculative decoding before committing
+- [x] mlx-lm upgraded to `>=0.31.2,<0.32`; `--prompt-concurrency 4` + `--decode-concurrency 4` set; stress test 5/5 PASS; multi-turn cache isolation PASS
+- [x] **Decision recorded:** hot-swap deferred; single-model / ≤3-client focus; vllm-mlx and multi-instance pool evaluation deferred to monthly recurring review
 
 ---
 
@@ -109,9 +116,13 @@
 
 ---
 
-### Phase 24: Agent Identity, Per-Client Routing & Metrics — NOT STARTED · after Phase 25
+### Phase 24: Agent Identity, Observability & Firewall Hook — NOT STARTED · after Phase 25
 
-> **Addresses:** Future multi-model routing, observability, firewall interception · **Roadmap:** [R8](ROADMAP.md#r8-agent-identity-per-client-routing--firewall-interception) · **Solution:** [S16](SOLUTIONS.md#s16-agent-identity--per-client-routing-proposed--phase-24)
+> **Addresses:** Observability, firewall interception · **Roadmap:** [R8](ROADMAP.md#r8-agent-identity-per-client-routing--firewall-interception) · **Solution:** [S16](SOLUTIONS.md#s16-agent-identity--per-client-routing-proposed--phase-24)
+>
+> **Scope reduction (2026-04-07):** Per-agent model routing / `config.toml` pin table deferred
+> with hot-swap strategy. Active scope: X-Agent-Name identity, per-agent metrics, firewall hook.
+> All three are useful for a single-model deployment and do not depend on multi-model routing.
 
 - [ ] **⚡ PRIORITY (no code needed) — Retrofit `X-Agent-Name` header into existing client setup guides:**
     - [ ] `docs/clients/ZEROCLAW_SETUP.md`
@@ -119,22 +130,16 @@
     - [ ] `docs/clients/OPENCLAW_SETUP.md`
     - [ ] `docs/clients/HERMES_AGENT_SETUP.md`
     - [ ] `docs/clients/OPENCODE_SETUP.md`
-    - [ ] Note in each: header is required; omission will generate a `[WARN]` once Phase 24 code lands
-- [ ] **`X-Agent-Name` parsing** in `HandleCompletions`:
-    - [ ] Extract and log agent name on every request (using Phase 25 slog)
-    - [ ] If absent: accept but emit `[WARN] missing X-Agent-Name` — not a hard error yet
-- [ ] **Config-file routing table** (`config.toml` at project root):
-    - [ ] Parse `[routing]` section at startup in `cmd/event-horizon/main.go`
-    - [ ] `default_model` field — used when agent has no pin and request carries no `model` field
-    - [ ] `[routing.pins]` map: agent slug → model HF path
-    - [ ] Hot-reload on `SIGHUP` (no daemon restart needed to change pins)
+- [ ] **`X-Agent-Name` parsing** in `HandleCompletions` (using Phase 25 slog):
+    - [ ] Extract and log agent name on every request
+    - [ ] If absent: accept but emit `[WARN] missing X-Agent-Name`
 - [ ] **Per-agent in-memory metrics** (`sync.Map` in `EventHorizonServer`):
-    - [ ] Track: request count, tokens out, avg TTFT, last model, last seen timestamp
+    - [ ] Track: request count, tokens out, avg TTFT, last seen timestamp
     - [ ] Expose on `GET /metrics/agents` (admin token required)
 - [ ] **Firewall interception hook** — implement only after Shapeshifter-Airlock Phase 4 complete:
-    - [ ] `routing.pins.<agent>.firewall_endpoint` — optional URL; called before proxying to MLX
+    - [ ] Optional `firewall_endpoint` per agent (config); called before proxying to MLX
     - [ ] <100ms timeout; fail-open (log warn, proxy anyway)
-    - [ ] `routing.firewall_bypass = true` for development
+- [ ] **DEFERRED — Config-file routing table** (`config.toml`, per-agent model pins, `SIGHUP` hot-reload): revisit when monthly MLX review adopts multi-model strategy.
 
 ---
 
@@ -142,16 +147,18 @@
 
 ---
 
-### Phase 13: Gemma 4 Native Integration — ON HOLD · waiting on mlx-lm upstream
+### Phase 13: Gemma 4 Default Model Evaluation — ON HOLD · waiting on mlx-lm upstream
 
 > **Blocked:** `mlx-lm` lacks `gemma4` architecture support. Re-evaluate when `mlx-lm >= 0.32.x` and PR #1112 merged (tracked in recurring tasks above).
+>
+> **Framing (revised 2026-04-07):** Gemma 4 is evaluated as a *replacement candidate* for the single default model slot (Hermes-3-8B-4bit), not as a second parallel model. Promote only if it outperforms Hermes on both TTFT and TPS under 3-client load on the M5 24 GB.
 
 - [x] Confirmed `mlx-lm 0.31.x` lacks gemma4 architecture
 - [x] Post-Gemma rollback complete: stable `mlx-lm==0.31.1` reinstalled, Go binary rebuilt
-- [ ] Download `mlx-community/gemma-4-e4b-it-4bit` (already cached — 4.9 GB) and `mlx-community/gemma-4-26b-a4b-it-4bit` (~15.6 GB)
-- [ ] Single-client benchmarking: TTFT and TPS for E4B (agent profile) and 26B MoE (firewall profile)
-- [ ] Stability and VRAM profiling for both modules
-- [ ] Substrate integration: verify hot-swap to new modules works cleanly
+- [ ] Download `mlx-community/gemma-4-e4b-it-4bit` (already cached — 4.9 GB) and `mlx-community/gemma-4-26b-a4b-it-4bit` (~15.6 GB) when mlx-lm >= 0.32.x ships
+- [ ] Single-client benchmarking: TTFT and TPS vs. Hermes-3-8B-4bit baseline (use `llm-proving-ground`)
+- [ ] 3-client concurrent load test: confirm stability and VRAM headroom on 24 GB M5
+- [ ] **Decision gate:** if Gemma 4 wins on TTFT + TPS → promote as new default and retire Hermes; otherwise keep Hermes
 
 ---
 
@@ -203,11 +210,11 @@
 
 ---
 
-### Phase 21: Zero-Interruption Model Pre-warming — CONTINGENCY
+### Phase 21: Zero-Interruption Model Pre-warming — DEFERRED · not applicable to single-model strategy
 
-> **Status:** Pursue only if Phase 16 had passed (it didn't) and LoRA multi-tenancy (E2) is insufficient. On the 24 GB M5 with ~11.6 GB of cached models and ~2 GB free RAM, running two models simultaneously is not feasible anyway — dual-model warm-up requires >9 GB headroom.
+> **Status:** Not applicable under the single-model strategy adopted 2026-04-07. Pre-warming exists to hide hot-swap latency — hot-swap is now deferred entirely. Phase 16 is NO-GO. On the 24 GB M5 running two models simultaneously requires >9 GB headroom we don't have.
 >
-> **Revised cold-swap context:** E1 shows cold swaps take 1.9–3.8s (not 20-30s as previously estimated). The urgency of pre-warming is reduced accordingly.
+> **Revisit only if:** (a) monthly MLX review adopts multi-model routing AND (b) E1 data shows swap latency is unacceptable for the use case at that time. Do not implement prewarming before multi-model strategy is confirmed.
 
 - [ ] `POST /v1/preload` — load new model in background on a temporary port without stopping the current model
     - VRAM budget check: reject if model A + model B > 22 GB
