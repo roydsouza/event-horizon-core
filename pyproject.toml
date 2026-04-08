@@ -5,7 +5,7 @@ description = "M5-Optimized Local LLM Inference Bridge"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mlx-lm",
+    "mlx-lm>=0.31.2,<0.32",
     "requests",
     "click",
     "python-dotenv",

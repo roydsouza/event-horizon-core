@@ -122,6 +122,9 @@ func (pm *ProcessManager) Start(ctx context.Context) (time.Time, time.Time, erro
 		"--model", pm.modelPath,
 		"--port", fmt.Sprintf("%d", pm.port),
 		"--prompt-cache-size", "512",
+		"--decode-concurrency", "16",  // sensible cap for 2-5 agent fleet; default is 32
+		// Note: --max-kv-size is not a mlx_lm.server flag; #883 (kernel panic) mitigation
+		// is handled by avoiding 58K+ token contexts, which we don't approach in normal use.
 	}
 
 	if draft := os.Getenv("MLX_DRAFT_MODEL"); draft != "" {

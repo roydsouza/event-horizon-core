@@ -240,14 +240,17 @@ SEPARATELY (independent of above):
 
 **`pyproject.toml`** — one line:
 ```
-mlx-lm==0.31.2
+mlx-lm>=0.31.2,<0.32
 ```
 
-**`manager.go` `Start()` — add two args** to the `args` slice:
+**`manager.go` `Start()` — add one arg** to the `args` slice:
 ```go
-"--max-kv-size", "8192",    // prevents IOGPUMemory kernel panic (#883)
-"--decode-concurrency", "16", // sensible cap for our 2-5 agent fleet
+"--decode-concurrency", "16", // sensible cap for our 2-5 agent fleet; default is 32
 ```
+
+> **Note on `--max-kv-size`**: this flag does not exist on `mlx_lm.server`. PR #906 added
+> KV size limits internally in the server logic, not as a CLI flag. For #883 mitigation,
+> the practical protection is avoiding 58K+ token contexts (not a concern for our agent fleet).
 
 **Regression test protocol:**
 ```bash

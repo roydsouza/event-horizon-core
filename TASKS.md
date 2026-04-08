@@ -91,9 +91,8 @@
 - [x] Document MLX multiplexing alternatives in `docs/research/MLX_MULTIPLEXING_OPTIONS.md`
 - [x] Verify upstream mlx_lm bug status (#965, #754, #883) — **#965 + #754 fixed in 0.31.2; #883 mitigated; #975 contested**
 - [x] Research complete — all open questions answered (vllm-mlx, oMLX, vllm-metal, mlx.distributed, sleep mode)
-- [ ] **Roy decides**: proceed with Step 1 (upgrade mlx-lm 0.31.2 + `--max-kv-size`) or different direction?
-- [ ] **Step 1 (if approved):** `mlx-lm==0.31.2` in `pyproject.toml`; `--max-kv-size 8192` + `--decode-concurrency 16` in `manager.go Start()`; run stress tests and multi-turn regression
-- [ ] **Step 2 (only if Step 1 insufficient):** Evaluate vllm-mlx — benchmark TTFT delta from losing speculative decoding before committing
+- [x] **Step 1 complete (2026-04-07):** `mlx-lm>=0.31.2,<0.32` in `pyproject.toml`; `--decode-concurrency 16` in `manager.go Start()`; `TestHighConcurrency` 5/5 PASS; multi-turn cache isolation PASS. Note: `--max-kv-size` is not a `mlx_lm.server` flag — #883 mitigation is avoiding 58K+ token contexts (not applicable to our usage).
+- [ ] **Step 2 (only if regressions emerge in production):** Evaluate vllm-mlx — benchmark TTFT delta from losing speculative decoding before committing
 
 ---
 
