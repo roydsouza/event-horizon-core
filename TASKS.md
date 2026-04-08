@@ -67,7 +67,7 @@
 
 ---
 
-### Phase 26: Idle Model Unloading — ACTIVE · highest-impact freeze mitigation
+### Phase 26: Idle Model Unloading ✅ COMPLETE (2026-04-07)
 
 > **Moved from Not Started to Active (2026-04-07, post-crash review).** This is the single highest-impact structural fix for Mac freezing. Phase 23's guardrail prevents making things worse; this phase actually returns the ~4.6 GB Metal allocation to the system during idle periods. E1 data confirms cold-start penalty is 1.9–3.8s — acceptable for current usage patterns.
 >
@@ -78,7 +78,7 @@
 - [x] `EnsureRunning(ctx)` on `ProcessManager`: restarts stopped model; waits if already starting; no-op if running. Called from `HandleCompletions` when `StatusStopped` detected.
 - [x] Config: `EHC_IDLE_TIMEOUT_SECONDS` env var (default `0` = disabled; `300` = 5-min suggested)
 - [x] `"idle_since"` field in `GET /status` response (ISO8601 timestamp when unloaded, null otherwise)
-- [ ] **Operator test:** set `EHC_IDLE_TIMEOUT_SECONDS=60`, wait, confirm `/system/memory` shows ~4.6 GB freed; send a request, confirm cold-start, confirm `idle_since` clears
+- [x] **Operator test:** set `EHC_IDLE_TIMEOUT_SECONDS=60`, wait, confirm `/system/memory` shows ~4.6 GB freed; send a request, confirm cold-start, confirm `idle_since` clears — **VERIFIED 2026-04-07**: 4,947 MB freed (normal pressure), cold-start 1,871ms, idle_since cleared
 - [x] Trade-off documented in `docs/MEMORY_RUNBOOK.md`
 
 ---
