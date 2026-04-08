@@ -20,20 +20,25 @@
 
 **Impact:** Every active agent gets a 503 during swaps. As the claw fleet grows, a single operator-initiated swap disrupts all sessions simultaneously.
 
-**Root cause breakdown — Experiment E1 data (`benchmarks/swap_latency.csv`):**
+**Root cause breakdown — Experiment E1 data (`benchmarks/swap_latency.csv`, controlled run 2026-04-07):**
 
-| Scenario | SIGKILL | Python startup | Weight loading | **Total** | Python % |
-|:---------|:--------|:--------------|:---------------|:----------|:---------|
-| Hot cache (filesystem warm, 2026-04-06) | ~50ms | ~202ms | 3–103ms | **258–357ms** | **57–79%** |
-| Cold cache (filesystem evicted, 2026-04-07) | ~50ms | ~202ms | 1,626–3,553ms | **1,877–3,807ms** | **5–11%** |
+| Scenario | Free RAM | SIGKILL | Python startup | Weight loading | **Total** | Python % |
+|:---------|:---------|:--------|:--------------|:---------------|:----------|:---------|
+| Hot cache (filesystem warm, 2026-04-06) | ~6 GB | ~51ms | ~203ms | 3–103ms | **258–357ms** | **57–79%** |
+| Controlled cold (sudo purge, 13.7 GB free, 2026-04-07) | 13.7 GB | ~51ms | ~202ms | 1,010–1,216ms | **1,263–1,469ms** | **14–16%** |
+| Pressure cold (naturally evicted, ~2 GB free, 2026-04-07) | ~2 GB | ~51ms | ~202ms | 1,626–3,553ms | **1,877–3,807ms** | **5–11%** |
 
 > [!IMPORTANT]
-> **Hot cache**: Python startup (~200ms) dominates — accounts for 57–79% of total swap time. Weight loading is negligible because MLX mmap's safetensors that are already in macOS filesystem cache.
+> **Key finding:** Python startup is constant at ~202ms regardless of cache state. It is not the bottleneck.
 >
-> **Cold cache**: Weight loading dominates (1.6–3.6s). Python overhead drops to 5–11% of total. On the 24GB M5 with only ~2GB free RAM and 4.6GB pinned by Hermes-3-8B, filesystem cache is routinely evicted by browser tabs and other apps. **Cold swaps are the norm, not the exception.**
+> **Hot cache**: Python startup dominates (57–79%) only because weight loading is negligible when safetensors are already mmap'd from the filesystem cache.
+>
+> **Controlled cold**: With clean memory (13.7 GB free), weight loading takes 1.0–1.2s. Python overhead is 14–16%. This is the best-case cold-swap scenario.
+>
+> **Pressure cold**: With ~2 GB free RAM (browser open, EHC holding 4.6 GB Metal), loading a 4.2 GB model forces the kernel to evict other pages during the load — nearly 3× slower than the clean-memory case. **This is the normal operating condition unless idle unloading (Phase 26) is enabled.** Python overhead drops to 5–11% because weight loading dominates so heavily.
 
 > [!WARNING]
-> **Phase 16 Go/No-Go (as of 2026-04-07): NO-GO.** E1 cold-cache data shows Python overhead is 5–11% of total swap time — well below the 30% threshold required to greenlight Swift migration. The dominant cost is weight loading, which is language-independent. Swift migration would save ~200ms on a 1,877–3,807ms operation: <10% reduction. See Phase 22 remaining items in TASKS.md for the corrected analysis task.
+> **Phase 16 Go/No-Go (FINAL, 2026-04-07): ❌ NO-GO.** Controlled E1 data confirms Python overhead is 14–16% even in the best-case cold scenario. Well below the 30% gate. Swift migration would save ~202ms on a 1,263–1,469ms operation — a ~14% reduction at most, and ~5% under real memory pressure. The dominant cost is weight loading, which is language-independent. Do not proceed to E3.
 
 #### Candidate Solutions
 

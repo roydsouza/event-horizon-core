@@ -24,18 +24,18 @@
 
 ---
 
-### Phase 22: Cold-Start Instrumentation (Experiment E1) — PARTIAL
+### Phase 22: Cold-Start Instrumentation (Experiment E1) ✅ COMPLETE (2026-04-07)
 
 > **Addresses:** [L1](LIMITATIONS.md#l1-cold-start-model-swap-latency) · **Solution:** [S15 (data)](SOLUTIONS.md)
-> **Key finding:** Cold-cache swaps (the real-world case) show Python overhead at only 5–11% — Phase 16 (Swift) gate is **NO-GO**. See LIMITATIONS.md L1.
+> **Key finding:** Python startup is constant ~202ms regardless of cache state. Weight loading is the only variable. Phase 16 (Swift) gate is **❌ NO-GO** across all three scenarios. See LIMITATIONS.md L1.
 
 - [x] Instrument `manager.go` — checkpoints at SIGKILL, uv start, first health poll, ready; CSV to `benchmarks/swap_latency.csv`
 - [x] Hot-cache measurement run (2026-04-06): 258–357ms total, Python 57–79%
-- [x] Cold-cache measurement run (2026-04-07, incidental): 1,877–3,807ms total, Python 5–11%
-- [x] LIMITATIONS.md L1 updated with two-scenario table and NO-GO verdict for Phase 16
+- [x] Pressure-cold measurement run (2026-04-07, incidental, ~2 GB free): 1,877–3,807ms total, Python 5–11%
+- [x] Controlled cold measurement run (2026-04-07, sudo purge, 13.7 GB free): 1,263–1,469ms total, Python 14–16% — 6 swaps, consistent
+- [x] LIMITATIONS.md L1 updated with three-scenario table and FINAL NO-GO verdict
 - [x] LIMITATIONS.md L10 (Unified Memory Pressure) added
-- [ ] **REMAINING** — Run controlled cold measurement: `sync && sudo purge`, then 5× each direction. **STALLED (System OOM crash 2026-04-07). SAFETY RULE: stop EHC and close browser before running — issuing `sudo purge` with MLX model loaded caused the crash.**
-- [ ] **REMAINING** — Confirm NO-GO recommendation is written into Phase 16 banner.
+- [x] NO-GO recommendation confirmed in Phase 16 banner
 
 ---
 
