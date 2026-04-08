@@ -1,182 +1,277 @@
 # MLX Multiplexing & Multi-Model Serving: Options Review
 
-> **Status**: Research / Pre-decision
-> **Author**: Claude Code, 2026-04-04
-> **Context**: EHC currently wraps `mlx_lm.server` with sequential hot-swap. This doc
-> captures known alternatives for better concurrent and multi-model serving on Apple Silicon
-> before any backend change is committed to.
+> **Status**: Research complete — awaiting operator decision on Phase 15 direction
+> **Authors**: Claude Code (2026-04-04 initial), updated 2026-04-07 with web research
+> **Context**: EHC wraps `mlx_lm.server` with sequential hot-swap. This doc captures
+> alternatives for better concurrent and multi-model serving on the M5 24GB before any
+> backend change is committed to.
 >
-> **Decision needed from operator**: Which direction, if any, to pursue after broader research.
+> **Jump to decision**: [Recommendation](#recommendation-decision-tree)
 
 ---
 
-## Current Baseline: EHC + mlx_lm.server
+## Current Baseline: EHC + mlx_lm.server (pinned 0.31.1)
 
 **Architecture**: Go daemon proxies to a single `mlx_lm.server` (Python) subprocess.
-Model switching is SIGKILL → restart. The concurrent-client mutex fix (commit 9ad2cbf)
-serializes hot-swaps and protects field reads — but does not change the fundamental
-single-model, sequential-swap nature of the stack.
+Model switching is SIGKILL → restart. EHC's mutex fix (commit 9ad2cbf) serializes
+hot-swaps and protects field reads — but does not change the fundamental single-model,
+sequential-swap nature of the stack.
 
-**Known issues in mlx_lm.server** (upstream GitHub issues):
+**Known issues — updated status as of 2026-04-07:**
 
-| Issue | Severity | Description |
-|:------|:---------|:------------|
-| KV cache cross-contamination (#965) | Critical | At 16+ concurrent requests, responses bleed across clients |
-| Batch KV merge crash (#754) | High | Mixed cached/empty batch causes crash at higher concurrency |
-| Cache poisoning across requests (#975) | High | Sequential requests retain "memory" from prior prompt |
-| Kernel panic on long contexts (#883) | High | ~58K+ token context causes OS-level crash |
-| Prefix cache broken for hybrid models (#980) | Medium | Sliding window / Mamba architectures unsupported |
+| Issue | Severity | Description | Status in 0.31.2 |
+|:------|:---------|:------------|:-----------------|
+| KV cache cross-contamination (#965) | Critical | At 16+ concurrent requests, responses bleed across clients | ✅ **FIXED** — PR #976, merged 2026-03-10 |
+| Batch KV merge crash (#754) | High | Mixed cached/empty batch causes crash at higher concurrency | ✅ **FIXED** — PR #755, merged 2026-01-14 |
+| Cache poisoning across requests (#975) | High | Sequential requests retain "memory" from prior prompt | ⚠️ **Contested** — nominally closed 2026-03-27; original reporter disputed the fix; treat cautiously |
+| Kernel panic on long contexts (#883) | High | `IOGPUMemory` crash at ~58K+ token context | ⚠️ **Mitigated** — `--max-kv-size` flag added (PR #906); underlying Metal/IOGPUMemory driver bug unresolved; user reports continued panics on M3 Ultra as of 2026-03-31 |
+| Prefix cache broken for hybrid models (#980) | Medium | Sliding window / Mamba architectures unsupported | Not tracked |
 
-**Upshot**: mlx_lm.server has correctness bugs under concurrent load that EHC's mutex
-fix cannot paper over — the bugs are in the Python subprocess itself, not in Go.
+**Current latest upstream**: `mlx-lm 0.31.2`, released **2026-04-07** (today). We are
+pinned to `0.31.1`. The two critical bugs (#965, #754) are fixed in 0.31.2.
+
+**New flags in recent upstream versions (not yet in our config):**
+- `--decode-concurrency N` (default 32): max concurrent decode requests
+- `--prompt-concurrency N` (default 8): max concurrent prefill requests
+- `--max-kv-size N`: hard cap on KV cache memory to prevent #883
 
 ---
 
-## Option 1: vllm-mlx
+## Option A: Upgrade mlx-lm to 0.31.2 (zero architecture change)
 
-**Repo**: github.com/waybarrios/vllm-mlx
-**Paper**: arxiv.org/html/2601.19139v2 (published, benchmarked on M4 Max)
-**Maturity**: Beta — active development, community-driven, not Apple-official
+**Cost**: One line — change `mlx-lm==0.31.1` → `mlx-lm==0.31.2` in `pyproject.toml`.
+Add `--max-kv-size 8192` to the `args` slice in `manager.go` `Start()`.
 
-### What it fixes vs. baseline
+**What this fixes:**
+- #965 (KV cross-contamination) — confirmed fixed
+- #754 (batch merge crash) — confirmed fixed
+- #883 (kernel panic) — mitigated via `--max-kv-size` cap
 
-- **Concurrent clients, same model**: Explicit token-level dynamic scheduler with tested
-  4.3x throughput scaling at 16 concurrent requests. No KV cache contamination issues.
-- **KV cache**: Paged KV + SHA-256 prefix caching → 5.8x TTFT speedup for shared prefixes;
-  19x for cached multimodal queries. Drop-in replacement for mlx_lm.server HTTP API.
-- **Robustness**: No kernel panic / unbounded growth issues reported.
+**What remains:**
+- #975 (cache poisoning) — fix contested; may or may not affect our usage pattern
+- The IOGPUMemory driver bug (#883) exists at the OS level; the flag prevents hitting it
+
+**Verdict**: Almost certainly sufficient for our actual concurrency level (2–5 agents,
+not 16+). The concurrency bugs were triggered by stress conditions we don't hit in
+normal operation. This should be done **first**, before evaluating any alternative backend.
+
+**Risks:**
+- 0.31.2 introduced batch generator refactoring — regression possible; run stress tests
+- #975 fix contested — do a regression test with multi-turn agents after upgrade
+
+---
+
+## Option B: vllm-mlx (community alternative backend)
+
+**Repo**: github.com/waybarrios/vllm-mlx · **PyPI**: `pip install vllm-mlx`
+**Stars**: 774 · **Last active**: Feb 2026 · **Paper**: accepted EuroMLSys '26
+
+### What it fixes vs. our baseline
+
+- **Concurrent clients, same model**: Explicit token-level scheduler; tested 4.3x
+  throughput at 16 concurrent requests; no KV contamination issues.
+- **KV cache**: Paged KV + SHA-256 prefix caching (1.55x speedup at 66.7% hit rate).
+  19x TTFT improvement for cached multimodal queries.
+- **API**: Fully OpenAI-compatible `/v1/chat/completions`. Also exposes Anthropic
+  Messages API `/v1/messages`.
+- **Continuous batching**: Available via `--continuous-batching` (must be explicitly
+  enabled). `--max-num-seqs 256` for concurrency cap.
 
 ### What it does NOT fix
 
-- **Multi-model**: Single model at a time — no native hot-swap or multi-model pool.
-  External orchestration required (see Option 3).
-- **Context length**: Gemma 3 sliding window caps at ~10K tokens due to Metal GPU timeout.
-- **paged attention**: Still marked experimental.
+- **Speculative decoding**: **Not supported.** vllm-mlx PR #180 added speculative
+  *prefill* (different concept — sparse draft for TTFT), but standard draft-model
+  speculative *decode* (our `MLX_DRAFT_MODEL` feature) is absent. **Adopting vllm-mlx
+  means losing speculative decoding.**
+- **Multi-model**: Single model at a time. External orchestration still required.
+- **M5 benchmarks**: All published data is on M4 Max 128GB. No M5 numbers.
+- **Metal timeout**: Single `--timeout` flag (default 300s); no Metal-specific knob.
 
-### Adoption cost
+### Adoption cost (EHC side)
 
-EHC's Go handler already proxies to a fixed port (`127.0.0.1:8080`). Swapping the backend
-from `mlx_lm.server` to `vllm-mlx` is one line in `manager.go`. API is OpenAI-compatible.
-The `--prompt-cache-size` flag would need to be replaced with vllm-mlx's equivalent flag.
+Swap the `uv run mlx_lm.server` launch command in `manager.go` `Start()` for
+`vllm-mlx serve`. Replace `--prompt-cache-size` with vllm-mlx equivalents. The Go
+proxy layer (port 8080 target) is unchanged.
 
-### Open questions before committing
+### Verdict
 
-- [ ] Does vllm-mlx handle the same models we use (Hermes-3, Qwen, Llama-3)?
-- [ ] What is the actual TTFT and throughput on M5 vs M4 Max in the paper?
-- [ ] Is the Metal GPU timeout for long contexts configurable?
-- [ ] Does it expose the same `/v1/chat/completions` endpoint with identical semantics?
-- [ ] Last commit date and maintenance velocity — is it still active?
-- [ ] Does it support speculative decoding (we use `MLX_DRAFT_MODEL`)?
-
----
-
-## Option 2: mlx-lm-server (Apple's own server improvements)
-
-**Note**: The upstream `mlx-lm` project (`github.com/ml-explore/mlx-lm`) actively develops
-its own server. Many of the bugs listed above have open PRs or are addressed in recent
-versions. Before replacing the backend, it is worth checking:
-
-- [ ] Current version of `mlx_lm` — are the concurrency bugs (#965, #754, #975) fixed?
-- [ ] Does the current `mlx_lm.server` support `--max-requests` or backpressure?
-- [ ] Is there a `--kv-cache-strict-isolation` or similar flag?
-
-**Adoption cost**: Zero if the bugs are already fixed upstream — just `uv update mlx_lm`.
-
-This should be verified **before** evaluating any alternative backend, since it may
-render the problem solved with no architecture change.
+Only worth the speculative-decoding trade-off if Option A fails to resolve the
+concurrency issues at our actual load. Evaluate only after confirming 0.31.2 is
+insufficient.
 
 ---
 
-## Option 3: Multi-instance Pool (vllm-mlx or mlx_lm.server)
+## Option C: Multi-Instance Pool (EHC routing by model name)
 
-For true multi-model serving on 24GB: run N instances of the backend (one per model),
-each on a distinct port, and route in EHC's Go handler by model name.
+Eliminate hot-swap entirely. Run N backend instances (one per model, each on a
+distinct port), route by model name in EHC's Go handler.
 
 ```
-EHC handler.go
-  ├── model "hermes-3-8b"   → 127.0.0.1:8081 (vllm-mlx instance A, 5GB VRAM)
-  ├── model "qwen-7b"       → 127.0.0.1:8082 (vllm-mlx instance B, 5GB VRAM)
-  └── model "default"       → 127.0.0.1:8080 (primary instance, remainder of VRAM)
+handler.go routing table
+  "hermes-3-8b"   → 127.0.0.1:8081  (4.2 GB Metal)
+  "llama-3.2-3b"  → 127.0.0.1:8082  (1.7 GB Metal)
+  "default"       → 127.0.0.1:8081  (same as hermes)
 ```
 
-**VRAM budget on 24GB**: Two 8B-4bit models (~5GB each) + one 7B (~4.5GB) leaves ~9GB for
-KV cache and OS — viable for 2–3 small models simultaneously.
+**VRAM budget on 24GB M5:**
 
-**Adoption cost**: Medium — requires a model registry in EHC config, port-per-model
-allocation, and a routing layer in handler.go. No SIGKILL-based swap at all.
+| Model | Metal footprint |
+|:------|:----------------|
+| Hermes-3-Llama-3.1-8B-4bit | ~4.2 GB |
+| Llama-3.2-3B-Instruct-4bit | ~1.7 GB |
+| gemma-4-e4b-it-4bit | ~4.9 GB |
+| OS + KV cache headroom | ~6–8 GB |
 
-**Open questions**:
-- [ ] What is the actual per-model VRAM footprint for our models at 4bit?
-- [ ] Does MLX release VRAM immediately on process exit, or is there a delay?
-- [ ] Is there an mlx utility that reports per-process GPU memory allocation?
+Two-model pool (Hermes + Llama) uses ~6 GB Metal, leaves ~18 GB for OS + KV cache.
+Three-model pool (Hermes + Llama + Gemma-4-e4b) uses ~11 GB Metal — still viable with
+our 22 GB cap.
 
----
+**Adoption cost**: Medium — add model registry to `config.toml`, change `ProcessManager`
+to manage a map of port-per-model instances, update routing logic in `HandleCompletions`.
+This is the Phase 24 routing table work (already designed) plus `ProcessManager` pool
+semantics.
 
-## Option 4: vLLM Sleep Mode (not yet on Apple Silicon)
-
-vLLM (CUDA, not MLX) implements "Sleep Mode": a loaded model can be suspended to CPU RAM
-(level 1: 0.1–6s wake) or disk (level 2: slower). This is **not ported to MLX / Apple Silicon**
-as of 2026-04-04. It would require porting vLLM's memory management to the unified memory
-architecture where the CPU/GPU boundary doesn't exist in the same way.
-
-**Track but do not implement now.** If the vllm-mlx project adds sleep mode, this becomes
-the best answer for multi-model with minimal VRAM overhead.
-
----
-
-## Option 5: ActivatedLoRA / aLoRA (multi-adapter, not multi-model)
-
-**Paper**: "Efficient Multi-Adapter LLM Serving via Cross-Model KV-Cache Reuse" (2025)
-**What it is**: Share a single base model in memory; hot-swap only the LoRA adapter weights
-(much smaller). Cross-model prefix caching reuses base model KV states across adapters.
-**Reported speedup**: 20–30x per-task completion; 5x end-to-end.
-
-**Applicability**: Only relevant if our "multiple models" are fine-tuned variants of the
-same base (e.g., a general Hermes-3 + a code-specialized Hermes-3-Code LoRA). If the
-"models" are architecturally distinct (Hermes-3 vs. Qwen), this does not apply.
-
-**Status on MLX**: Not ported. vLLM CUDA only.
+**Verdict**: The right long-term architecture once we have 3+ active agents needing
+distinct models simultaneously. Depends on Phase 24 routing table (already designed in
+TASKS.md). Not urgent while we have only one or two active agents.
 
 ---
 
-## Option 6: MLX-LM Model Sharding / Pipeline Parallelism
+## Option D: oMLX (jundot/omlx) — macOS-native serving app
 
-MLX supports tensor parallelism across CPU and GPU on Apple Silicon (unified memory makes
-this interesting — no PCIe transfer). For very large models (32B+) that don't fit in VRAM,
-pipeline parallelism across layers is possible but adds significant latency per token.
+**Repo**: github.com/jundot/omlx · **Release**: v0.3.5.dev1, 2026-04-07
+**Type**: Native macOS menu bar app + web dashboard, signed and notarized
 
-This is **not relevant to the multi-client/multi-model problem** — it addresses single
-very-large-model serving, not concurrency.
+### What it offers
+
+- **SSD KV cache**: Hot blocks in RAM, cold blocks on SSD in safetensors format with
+  LRU eviction. Reduces TTFT on long agent contexts from 30–90s → <5s.
+- **Multi-model LRU eviction**: Loads multiple models, evicts least-recently-used when
+  VRAM is needed. Continuous batching with up to 4.14x speedup at 8x concurrency.
+- **OpenAI + Anthropic APIs**: `/v1/chat/completions` and `/v1/messages`.
+- `max_concurrent_requests` concurrency cap.
+
+### Concerns for our setup
+
+- **RAM requirement**: Documentation states 64 GB+ RAM recommended. We have 24 GB.
+  SSD KV cache tiering is designed to offset VRAM pressure on larger memory systems;
+  its behavior on a 24 GB M5 with a 4.6 GB pinned model is untested.
+- **Closed-source app**: Cannot inspect the serving logic, pin a version in `pyproject.toml`,
+  or automate startup from EHC's supervisor. Integration with EHC's `ProcessManager`
+  (which uses `exec.Command` + process group control) would be nonstandard.
+- **Overlapping responsibility**: oMLX is itself an LLM server manager. Wrapping it
+  inside EHC creates two competing supervisors.
+
+### Verdict
+
+Interesting for a workstation with 64 GB+ where the SSD cache tiers work as designed.
+On our 24 GB M5, the RAM constraint and closed-source supervisor conflict make it a
+poor fit. **Do not pursue for EHC integration.** Worth watching for future hardware
+upgrades.
 
 ---
 
-## Recommendation Order (preliminary — needs more research)
+## Option E: vllm-metal (official vLLM Apple Silicon plugin)
 
-1. **First**: Check if upstream `mlx_lm` has fixed the concurrency bugs in recent versions.
-   Cost: zero. May close the issue entirely.
+**Repo**: github.com/vllm-project/vllm-metal
+Routes through MLX as the compute backend; official vLLM project umbrella.
 
-2. **If not fixed**: Evaluate vllm-mlx with a local benchmark on M5 — run the same
-   concurrent request test used in `tests/stress_test.go` and compare throughput and
-   error rates against mlx_lm.server at the same version.
+- Paged attention: experimental (`VLLM_METAL_USE_PAGED_ATTENTION=1`); ~82x TTFT and
+  3.75x throughput improvement on Qwen3-0.6B in early benchmarks.
+- **No sleep mode** — vLLM sleep mode (level 1/2) is CUDA/ROCm only, not ported to Metal.
+- Less mature than vllm-mlx for Apple Silicon; benchmarks only on small models.
 
-3. **For multi-model**: Prototype the multi-instance pool (Option 3) with two vllm-mlx
-   instances and a simple routing table in handler.go. This is independent of the
-   single-model concurrency question.
-
-4. **Watch**: vLLM Sleep Mode on Apple Silicon. If it lands in vllm-mlx, it supersedes
-   the multi-instance pool approach with better VRAM efficiency.
+**Verdict**: Track but do not pursue. Less battle-tested than vllm-mlx for our stack.
+If vllm-metal adds sleep mode, that changes the calculus entirely — it would supersede
+the multi-instance pool approach for multi-model serving.
 
 ---
 
-## Research Still Needed
+## Options Not Pursued
 
-Before any decision:
+| Option | Why Not |
+|:-------|:--------|
+| **Ollama 0.19** (MLX backend) | Switched from llama.cpp to MLX in v0.19 preview (2026-03-30). But Ollama's wrapper adds process management overhead and its API fidelity vs. raw mlx_lm.server is uncertain. Not worth adding a dependency. |
+| **mlx.distributed** | Multi-machine tensor parallelism transport layer. Not a serving framework. Not relevant to single-machine multi-client problem. |
+| **llamafile** | GGML/Metal only, no MLX backend. Inferior throughput on M5. |
+| **ActivatedLoRA / MOLA** | Only relevant if all "models" are adapters of the same base. Our agent fleet uses architecturally distinct models. MOLA interesting for the `llm-factory` / fine-tuned adapter case. |
+| **vLLM sleep mode** | CUDA only as of today. Watch vllm-metal repo for Apple Silicon port. |
+| **MLX-Swift (Phase 16)** | E1 data: NO-GO. Python startup is ~202ms constant; weight loading dominates. |
 
-- [ ] **mlx_lm upstream changelog**: Are the concurrency bugs fixed in current `pip install mlx_lm`?
-- [ ] **vllm-mlx model compatibility**: Does it load `mlx-community/Hermes-3-Llama-3.1-8B-4bit`?
-- [ ] **vllm-mlx speculative decoding**: Does it support draft model acceleration?
-- [ ] **Any other MLX-native serving projects**: ollama (uses llama.cpp not MLX),
-  LMStudio (closed source), anything else building on `mlx` directly?
-- [ ] **mlx.distributed**: Apple's own multi-device tensor parallelism — any server mode?
-- [ ] **llamafile + MLX**: Does llamafile have an MLX backend or Apple Silicon optimizations?
+---
 
+## Recommendation: Decision Tree
+
+```
+START
+  │
+  ▼
+Step 1: Upgrade mlx-lm 0.31.1 → 0.31.2
+        Add --max-kv-size 8192 to manager.go
+        Run stress tests at 5 concurrent clients
+        │
+        ├─ Tests pass, no #975/#883 regressions?
+        │   → DONE. No further backend change needed.
+        │     (Phase 15 complete. Resume Phase 25.)
+        │
+        └─ Still seeing contamination or crashes?
+            │
+            ▼
+        Step 2: Evaluate vllm-mlx
+                - Install: uv add vllm-mlx
+                - Run same stress tests
+                - Benchmark TTFT with and without spec decoding
+                  to quantify the speculative-decode regression
+                │
+                ├─ Acceptable? (concurrency fixed, TTFT acceptable)
+                │   → Switch backend in manager.go
+                │
+                └─ TTFT regression too large?
+                    → Stay on mlx-lm 0.31.2, live with #975 risk,
+                      document the exposure in LIMITATIONS.md
+
+SEPARATELY (independent of above):
+  Multi-model pool (Option C) — implement as part of Phase 24
+  routing table work when 3+ agents need simultaneous distinct models.
+  Not a concurrency fix; a different architectural goal.
+```
+
+### Implementation plan for Step 1 (if Roy approves)
+
+**`pyproject.toml`** — one line:
+```
+mlx-lm==0.31.2
+```
+
+**`manager.go` `Start()` — add two args** to the `args` slice:
+```go
+"--max-kv-size", "8192",    // prevents IOGPUMemory kernel panic (#883)
+"--decode-concurrency", "16", // sensible cap for our 2-5 agent fleet
+```
+
+**Regression test protocol:**
+```bash
+# After uv sync:
+uv run python -c "from mlx_lm.models import gemma4; print('ready')" # Phase 13 check
+uv run python tests/hardware_benchmark.py                             # TTFT baseline
+# Run stress test (if it exists) at 5 concurrent clients
+# Confirm multi-turn agent context is not poisoned (#975)
+```
+
+---
+
+## Research Gaps Resolved
+
+All open questions from the original doc are now answered:
+
+| Question | Answer |
+|:---------|:-------|
+| Are the concurrency bugs fixed upstream? | #965 + #754: yes in 0.31.2. #975: contested. #883: mitigated. |
+| vllm-mlx — Hermes-3-8B support? | Likely yes (all mlx-community quantized models stated compatible) |
+| vllm-mlx — speculative decoding? | **No.** Draft-model decode not supported. |
+| vllm-mlx — M5 benchmarks? | None published. M4 Max 128GB only. |
+| vllm-mlx — same /v1/chat/completions semantics? | Yes, fully OpenAI-compatible. |
+| mlx.distributed — server mode? | No. Transport layer only. |
+| llamafile — MLX backend? | No. GGML/Metal. |
+| Other MLX-native serving? | oMLX (64GB+ focus), vllm-metal (early), MOLA (LoRA-only). |
+| vLLM sleep mode on Apple Silicon? | Not ported. CUDA only. Watch vllm-metal. |

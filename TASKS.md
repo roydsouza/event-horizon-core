@@ -85,12 +85,15 @@
 ### Phase 15: Concurrency Correctness & Multiplexing Research — PARTIAL · Roy decision needed
 
 > **Addresses:** [L2](LIMITATIONS.md#l2-single-model-residency) · **Research:** `docs/research/MLX_MULTIPLEXING_OPTIONS.md`
+> **Research updated 2026-04-07** — all open questions answered; see Decision Tree in the doc.
 
 - [x] Fix hot-swap race condition in `ProcessManager` (`swapMu` + `mu` mutexes, commit 9ad2cbf)
 - [x] Document MLX multiplexing alternatives in `docs/research/MLX_MULTIPLEXING_OPTIONS.md`
-- [x] Verify upstream mlx_lm bug status (#965, #754, #883) against current pinned version
-- [ ] **Roy reviews** `docs/research/MLX_MULTIPLEXING_OPTIONS.md` and decides direction
-- [ ] **Implement chosen direction** (TBD pending Roy's decision)
+- [x] Verify upstream mlx_lm bug status (#965, #754, #883) — **#965 + #754 fixed in 0.31.2; #883 mitigated; #975 contested**
+- [x] Research complete — all open questions answered (vllm-mlx, oMLX, vllm-metal, mlx.distributed, sleep mode)
+- [ ] **Roy decides**: proceed with Step 1 (upgrade mlx-lm 0.31.2 + `--max-kv-size`) or different direction?
+- [ ] **Step 1 (if approved):** `mlx-lm==0.31.2` in `pyproject.toml`; `--max-kv-size 8192` + `--decode-concurrency 16` in `manager.go Start()`; run stress tests and multi-turn regression
+- [ ] **Step 2 (only if Step 1 insufficient):** Evaluate vllm-mlx — benchmark TTFT delta from losing speculative decoding before committing
 
 ---
 
