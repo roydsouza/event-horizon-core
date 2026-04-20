@@ -8,7 +8,7 @@ This is the contract for bug fixes. Forge picks up defects here **before** worki
 |--------|---------|
 | `[ ]` | Open — available for Forge to pick up |
 | `[/]` | In Progress — Forge has this; do not touch |
-| `[x]` | Fixed — Crucible verified + verdict on file in `../ehc-lpg/crucible-verdicts/` |
+| `[x]` | Fixed — Crucible verified + verdict on file in `../sync/crucible-verdicts/` |
 
 **Rules:**
 - Fix only the claimed defect per commit — no feature additions in the same commit.
