@@ -46,7 +46,20 @@ Always check `TASKS.md` (and `tasks/` subdirectory if present) on session open t
 - **Documentation:** Keep `README.md`, `SYNC_LOG.md`, and inline docs in sync with implementation at all times
 - **Tier:** Standard (tests required, conventional commits)
 
-## 6. Downstream Consumers
+## 6. Governance Process
+
+This project is governed by the shared **Sync coordination layer** at `../sync/`.
+
+- **Forge** (AntiGravity/Gemini) builds features and fixes defects.
+- **Crucible** (AntiGravity/Gemini) independently re-runs verification and issues Review Verdicts.
+- **Claude Code** audits architectural decisions, VRAM safety changes, and model promotion gates.
+- **Roy** routes work between entities and makes all promotion decisions.
+
+Read `../sync/ANTIGRAVITY_RULES.md` at session start. File verdicts to `../sync/crucible-verdicts/`. File audit requests to `../sync/auditor-inbox/`. See `../sync/CLAUDE.md` for the authoritative process spec, including the coexistence contract and audit trigger list.
+
+**DEFECTS.md** in this directory is the contract for bug fixes — always check it before `TASKS.md`.
+
+## 7. Downstream Consumers
 
 The following projects depend on Event Horizon Core and must be considered when making breaking changes:
 

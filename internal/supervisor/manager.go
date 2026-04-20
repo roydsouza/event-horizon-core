@@ -3,7 +3,7 @@ package supervisor
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -116,7 +116,7 @@ func (pm *ProcessManager) Start(ctx context.Context) (time.Time, time.Time, erro
 	model := pm.modelPath
 	pm.mu.Unlock()
 
-	log.Printf("[Supervisor] Starting MLX server for model: %s on port %d", model, pm.port)
+	slog.Info("Starting MLX server", "model", model, "port", pm.port)
 
 	args := []string{"run", "mlx_lm.server",
 		"--model", pm.modelPath,
@@ -127,7 +127,7 @@ func (pm *ProcessManager) Start(ctx context.Context) (time.Time, time.Time, erro
 	}
 
 	if draft := os.Getenv("MLX_DRAFT_MODEL"); draft != "" {
-		log.Printf("[Supervisor] Enabling Speculative Decoding with draft model: %s", draft)
+		slog.Info("Enabling Speculative Decoding", "draft_model", draft)
 		args = append(args, "--draft-model", draft)
 	}
 
@@ -151,9 +151,9 @@ func (pm *ProcessManager) Start(ctx context.Context) (time.Time, time.Time, erro
 		pm.status = StatusStopped
 		pm.mu.Unlock()
 		if err != nil {
-			log.Printf("[Supervisor] Server process exited with error: %v", err)
+			slog.Error("Server process exited", "error", err)
 		} else {
-			log.Printf("[Supervisor] Server process exited cleanly")
+			slog.Info("Server process exited cleanly")
 		}
 	}()
 
@@ -169,7 +169,7 @@ func (pm *ProcessManager) Start(ctx context.Context) (time.Time, time.Time, erro
 func (pm *ProcessManager) WaitUntilHealthy(ctx context.Context) (time.Time, time.Time, error) {
 	var firstHealth time.Time
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", pm.port)
-	log.Printf("[Supervisor] Waiting for HTTP health on %s...", healthURL)
+	slog.Info("Waiting for HTTP health", "url", healthURL)
 
 	ticker := time.NewTicker(200 * time.Millisecond) // Reduced from 500ms for tighter instrumentation
 	defer ticker.Stop()
@@ -194,7 +194,7 @@ func (pm *ProcessManager) WaitUntilHealthy(ctx context.Context) (time.Time, time
 			if err == nil {
 				resp.Body.Close()
 				if resp.StatusCode == http.StatusOK {
-					log.Printf("[Supervisor] Server is healthy on port %d", pm.port)
+					slog.Info("Server is healthy", "port", pm.port)
 					return time.Now(), firstHealth, nil
 				}
 			}
@@ -227,11 +227,11 @@ func (pm *ProcessManager) doSwitch(ctx context.Context, newModelPath string) err
 	pm.mu.RUnlock()
 
 	if current == newModelPath {
-		log.Printf("[Supervisor] Model %s already loaded, skipping redundant swap", newModelPath)
+		slog.Info("Model already loaded, skipping redundant swap", "model", newModelPath)
 		return nil
 	}
 
-	log.Printf("[Supervisor] Hot-Swapping Model: %s -> %s", current, newModelPath)
+	slog.Info("Hot-Swapping Model", "from", current, "to", newModelPath)
 
 	// Phase 23: Check memory pressure before committing to a swap.
 	stats, err := GetMemoryStats()
@@ -240,7 +240,7 @@ func (pm *ProcessManager) doSwitch(ctx context.Context, newModelPath string) err
 			return fmt.Errorf("ABORTING SWAP: Critical memory pressure (%d MB free). Close other apps to prevent system freeze", stats.TotalFreeMB)
 		}
 		if stats.Pressure == PressureWarn {
-			log.Printf("[WARNING] High memory pressure detected (%d MB free). Proceeding, but system may lag", stats.TotalFreeMB)
+			slog.Warn("High memory pressure detected. Proceeding, but system may lag", "free_mb", stats.TotalFreeMB)
 		}
 	}
 
@@ -273,9 +273,10 @@ func (pm *ProcessManager) doSwitch(ctx context.Context, newModelPath string) err
 		PythonOverhead: (float64(firstHealth.Sub(uvStart).Nanoseconds()) / float64(readyTime.Sub(killStart).Nanoseconds())) * 100.0,
 	}
 
-	log.Printf("[Experiment E1] Swap Complete. Python Overhead: %.2f%% (Total: %.2fs)", metrics.PythonOverhead, metrics.TotalDuration/1000.0)
+	slog.Info("swap", "from", current, "to", newModelPath, "duration_ms", metrics.TotalDuration, "trigger", "explicit")
+	
 	if err := appendMetricsToCSV(metrics); err != nil {
-		log.Printf("[WARNING] Failed to log swap metrics: %v", err)
+		slog.Error("Failed to log swap metrics", "error", err)
 	}
 
 	return nil
@@ -323,7 +324,7 @@ func (pm *ProcessManager) StopWithTime() (time.Time, error) {
 		return time.Now(), nil
 	}
 
-	log.Printf("[Supervisor] Stopping server process group...")
+	slog.Info("Stopping server process group")
 
 	err := syscall.Kill(-pm.cmd.Process.Pid, syscall.SIGKILL)
 	if err != nil {

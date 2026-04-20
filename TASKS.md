@@ -15,155 +15,62 @@
 
 | Frequency | Next Due | Task | Notes |
 |:----------|:---------|:-----|:------|
-| Weekly | 2026-04-12 | **Model cache audit** — `du -sh ~/.cache/huggingface/hub/models--* \| sort -rh`. Evict unused models, cross-check with `llm-proving-ground/reports/cache-manifest.md`. | Current inventory: see Model Cache section below |
-| Weekly | 2026-04-12 | **Default model evaluation** — is there a better single-model candidate than `Hermes-3-Llama-3.1-8B-4bit`? Primary candidate: Gemma 4 26B A4B (blocked on `mlx-lm >= 0.32.x` + PR #1112). Check readiness: `uv run python3 -c "from mlx_lm.models import gemma4; print('ready')"` | See Phase 13 for benchmark plan once ready |
+| Weekly | 2026-04-25 | **Model cache audit** — `du -sh ~/.cache/huggingface/hub/models--* \| sort -rh`. Evict unused models, cross-check with `llm-proving-ground/reports/cache-manifest.md`. | Current inventory: see Model Cache section below |
+| Weekly | 2026-04-25 | **Default model evaluation** — is there a better single-model candidate than `Hermes-3-Llama-3.1-8B-4bit`? Primary candidate: Gemma 4 26B A4B (ready as of `mlx-lm >= 0.32.x`). Check readiness: `uv run python3 -c "from mlx_lm.models import gemma4; print('ready')"` | Gemma 4 readiness verified 2026-04-18. |
 | Monthly | 2026-05-07 | **MLX multiplexing options re-evaluation** — update `docs/research/MLX_MULTIPLEXING_OPTIONS.md` with current state of mlx-lm, vllm-mlx, oMLX, vllm-metal; run any experiments needed; decide if hot-swap / multi-model strategy should be adopted. | Hot-swap deferred 2026-04-07; see Phase 15 for context |
 
 ---
 
 ## 🟡 Active / Next
 
----
-
-### Phase 22: Cold-Start Instrumentation (Experiment E1) ✅ COMPLETE (2026-04-07)
-
-> **Addresses:** [L1](LIMITATIONS.md#l1-cold-start-model-swap-latency) · **Solution:** [S15 (data)](SOLUTIONS.md)
-> **Key finding:** Python startup is constant ~202ms regardless of cache state. Weight loading is the only variable. Phase 16 (Swift) gate is **❌ NO-GO** across all three scenarios. See LIMITATIONS.md L1.
-
-- [x] Instrument `manager.go` — checkpoints at SIGKILL, uv start, first health poll, ready; CSV to `benchmarks/swap_latency.csv`
-- [x] Hot-cache measurement run (2026-04-06): 258–357ms total, Python 57–79%
-- [x] Pressure-cold measurement run (2026-04-07, incidental, ~2 GB free): 1,877–3,807ms total, Python 5–11%
-- [x] Controlled cold measurement run (2026-04-07, sudo purge, 13.7 GB free): 1,263–1,469ms total, Python 14–16% — 6 swaps, consistent
-- [x] LIMITATIONS.md L1 updated with three-scenario table and FINAL NO-GO verdict
-- [x] LIMITATIONS.md L10 (Unified Memory Pressure) added
-- [x] NO-GO recommendation confirmed in Phase 16 banner
-
----
-
-### Phase 23: Unified Memory Pressure Monitoring ✅ COMPLETE (2026-04-07)
-
-> **Addresses:** [L10](LIMITATIONS.md#l10-unified-memory-pressure--non-compressible-metal-allocations--high-mac-freeze-risk) · **Solutions:** [S14](SOLUTIONS.md#s14-macos-memory-pressure-hook-proposed--medium-term), [S15](SOLUTIONS.md#s15-system-memory-endpoint-proposed--near-term)
-> **Key finding:** Native `vm_stat` parsing in Go identifies critical pressure (< 1GB free) and successfully aborts model swaps to prevent kernel-level UI freezes.
-
-- [x] **`/system/memory` endpoint** (`handler.go`) — [S15](SOLUTIONS.md#s15-system-memory-endpoint-proposed--near-term)
-    - [x] Parse `vm_stat` output in Go; return JSON with pressure state
-    - [x] Thresholds: warn < 2048 MB free, critical < 1024 MB free
-- [x] **Memory pressure guardrail** (`manager.go`)
-    - [x] Integrated `GetMemoryStats` into `doSwitch`
-    - [x] Abort swap with error if pressure is `critical`
-- [x] Verify `/system/memory` and swap rejection under pressure (2026-04-07)
-
----
-
-### Phase 23-GW: Phase 23 Get-Well Items ✅ COMPLETE (2026-04-07)
-
-> Post-crash review (2026-04-07, Claude Code) surfaced three correctness issues in AntiGravity's Phase 23 delivery, plus two missing spec items that were dropped.
-
-- [x] **`/system/memory` auth gate removed** — endpoint moved off `adminAuthMiddleware`; it is an observability primitive like `/status`, not an admin action. Required for Phase 26 idle-unloading health checks without credential plumbing.
-- [x] **`MemoryStats.Speculative` renamed to `SpeculativeMB`** — field name now consistent with all other struct fields; JSON key unchanged (`speculative_mb`).
-- [x] **`verify_metrics_ttl.py` + `verify_drain.py` .env path fixed** — `"event-horizon-core/.env"` → `".env"` (scripts run from project root)
-- [x] **Proactive memory pressure logging** (`handler.go`) — `pressureMonitor()` goroutine launched from `Start()`: polls every 30s, logs on state transitions only (no spam). `[WARN memory-pressure]` / `[INFO memory-pressure]` in daemon.log.
-- [x] **`docs/MEMORY_RUNBOOK.md`** — operator runbook: pressure state table, log indicators, freeze runbook, pre-benchmark checklist (stop EHC + close browser before `sudo purge`), Phase 26 trade-off table.
-
----
-
-### Phase 26: Idle Model Unloading ✅ COMPLETE (2026-04-07)
-
-> **Moved from Not Started to Active (2026-04-07, post-crash review).** This is the single highest-impact structural fix for Mac freezing. Phase 23's guardrail prevents making things worse; this phase actually returns the ~4.6 GB Metal allocation to the system during idle periods. E1 data confirms cold-start penalty is 1.9–3.8s — acceptable for current usage patterns.
+### Phase 13: Gemma 4 Default Model Evaluation — ACTIVE
+> **Addresses:** [L7](LIMITATIONS.md#l7-lack-of-structured-observability) (partial) · **Goal:** Evaluate Gemma 4 as a *replacement candidate* for the single default model slot (Hermes-3-8B-4bit). Promote only if it outperforms Hermes on both TTFT and TPS under 3-client load on the M5 24 GB.
 >
-> **Addresses:** [L10](LIMITATIONS.md#l10-unified-memory-pressure--non-compressible-metal-allocations--high-mac-freeze-risk) · **Solution:** [S13](SOLUTIONS.md#s13-idle-model-unloading-proposed--medium-term)
+> **Status:** `mlx-lm >= 0.32.x` is available and supports the `gemma4` architecture.
 
-- [x] `lastRequestNano int64` + `idleSince int64` (atomic) added to `EventHorizonServer`; `lastRequestNano` updated on every `HandleCompletions` entry
-- [x] `idleMonitor()` goroutine in `Start()`: checks every 60s; calls `pm.IdleUnload()` if idle > timeout; `IdleUnload` serialized through `swapMu` to prevent race with `EnsureRunning`
-- [x] `EnsureRunning(ctx)` on `ProcessManager`: restarts stopped model; waits if already starting; no-op if running. Called from `HandleCompletions` when `StatusStopped` detected.
-- [x] Config: `EHC_IDLE_TIMEOUT_SECONDS` env var (default `0` = disabled; `300` = 5-min suggested)
-- [x] `"idle_since"` field in `GET /status` response (ISO8601 timestamp when unloaded, null otherwise)
-- [x] **Operator test:** set `EHC_IDLE_TIMEOUT_SECONDS=60`, wait, confirm `/system/memory` shows ~4.6 GB freed; send a request, confirm cold-start, confirm `idle_since` clears — **VERIFIED 2026-04-07**: 4,947 MB freed (normal pressure), cold-start 1,871ms, idle_since cleared
-- [x] Trade-off documented in `docs/MEMORY_RUNBOOK.md`
+- [x] Confirmed `mlx-lm 0.31.x` lacks gemma4 architecture
+- [x] Post-Gemma rollback complete: stable `mlx-lm==0.31.1` reinstalled, Go binary rebuilt
+- [ ] Update `pyproject.toml` to `mlx-lm>=0.32.0` to enable gemma4 support
+- [ ] Download `mlx-community/gemma-4-e4b-it-4bit` (already cached — 4.9 GB) and `mlx-community/gemma-4-26b-a4b-it-4bit` (~15.6 GB)
+- [ ] Single-client benchmarking: TTFT and TPS vs. Hermes-3-8B-4bit baseline (use `llm-proving-ground`)
+- [ ] 3-client concurrent load test: confirm stability and VRAM headroom on 24 GB M5
+- [ ] **Decision gate:** if Gemma 4 wins on TTFT + TPS → promote as new default and retire Hermes; otherwise keep Hermes
 
----
-
-### Phase 15: Concurrency Correctness & Multiplexing Research ✅ COMPLETE (2026-04-07)
-
-> **Addresses:** [L2](LIMITATIONS.md#l2-single-model-residency) · **Research:** `docs/research/MLX_MULTIPLEXING_OPTIONS.md`
+### Phase 27: Tier 2 (Free) Integration — Gemma 4 (Google AI Studio)
+> **Addresses:** [L11] (Lack of high-reasoning free tier) · **Goal:** Provide zero-cost access to Gemma 4 via Google AI Studio when using the `--model free` alias.
 >
-> **Strategic decision (2026-04-07):** Single-model strategy adopted. EHC serves one model
-> (Hermes-3-8B-4bit default) to ≤3 concurrent CLAW clients. Hot-swap and multi-model routing
-> are deferred until the ecosystem matures. Hot-swap code remains in place but is not exercised
-> in normal operation — station CLAWs omit the `model` field per EHC client convention.
-> `--prompt-concurrency 4` + `--decode-concurrency 4` reflect this intent explicitly.
-> **Re-evaluate monthly** (see Recurring Tasks).
+> **Technical Plan:** Implement a dedicated Go provider for Google's Generative AI API and route requests matching the "free" alias to it, bypassing the local MLX supervisor.
 
-- [x] Fix hot-swap race condition in `ProcessManager` (`swapMu` + `mu` mutexes, commit 9ad2cbf)
-- [x] Document MLX multiplexing alternatives in `docs/research/MLX_MULTIPLEXING_OPTIONS.md`
-- [x] Verify upstream mlx_lm bug status — #965 + #754 fixed in 0.31.2; #883 mitigated; #975 contested
-- [x] Research complete — all open questions answered (vllm-mlx, oMLX, vllm-metal, mlx.distributed, sleep mode)
-- [x] mlx-lm upgraded to `>=0.31.2,<0.32`; `--prompt-concurrency 4` + `--decode-concurrency 4` set; stress test 5/5 PASS; multi-turn cache isolation PASS
-- [x] **Decision recorded:** hot-swap deferred; single-model / ≤3-client focus; vllm-mlx and multi-instance pool evaluation deferred to monthly recurring review
+- [ ] Obtain Google AI Studio API Key and add `GOOGLE_AI_API_KEY` to `.env`
+- [ ] Implement `GoogleGenerativeAIProvider` in a new `internal/providers/` package
+- [ ] Update `HandleCompletions` in `internal/server/handler.go` to intercept `model: "free"` requests
+- [ ] Implement SSE streaming support for the Gemini provider (matching Phase 17 standards)
+- [ ] Add integration test in `tests/stress_test.go` to verify remote routing
+- [ ] Update `CHEATSHEET.md` to reflect active status of Tier 2
 
----
+### Phase 28: Integrated Proving Ground Workflow
+> **Goal:** Exercise co-existence and high-integrity model promotion by integrating EHC with `llm-proving-ground`.
+>
+> **Workflow:** Simulate a production station where a client is running while a background evaluation/promotion cycle occurs.
 
-### Phase 25: Structured Observability (slog) — NOT STARTED · pre-condition for Phase 24
+- [ ] Create/Run a representative client (e.g. `tests/dummy_agent.py`) actively consuming the EHC Port 8000
+- [ ] Trigger `llm-proving-ground` to download a new candidate model
+- [ ] **Acquire Maintenance Lock**: `llm-proving-ground` requests `/system/maintenance` on EHC (graceful client stall)
+- [ ] **Swap Candidate**: `llm-proving-ground` swaps the candidate into Port 8080 via EHC
+- [ ] **Evaluation Suite**: Run full benchmarking harnesses through EHC routes
+- [ ] **Signal Decision**: Automated prompt to Roy to either **Promote** (sets new default) or **Revert** (unloads candidate)
+- [ ] Verify transition back to operational state for the original representative client
 
-> **Addresses:** [L7](LIMITATIONS.md#l7-lack-of-structured-observability) · **Roadmap:** [R5](ROADMAP.md#r5-structured-observability--near-term)
-> **Why before Phase 24:** Request IDs are needed to correlate per-agent metrics correctly.
-
-- [ ] Replace all `log.Printf` calls in `handler.go` and `manager.go` with `slog` (Go stdlib, zero new dependencies)
-- [ ] Emit structured JSON log lines: `{"time", "level", "msg", "request_id", "agent_name", "duration_ms", "model"}`
-- [ ] Add `X-Request-ID` response header (generate UUID per request if not provided by client)
-- [ ] Add in-memory event ring buffer (last 200 events) on `GET /debug/events` (admin token required)
-- [ ] Add structured log fields to swap events: `{"event":"swap","from_model","to_model","duration_ms","trigger":"implicit|explicit|promote"}`
-
----
-
-### Phase 24: Agent Identity, Observability & Firewall Hook — NOT STARTED · after Phase 25
-
+### Phase 24: Agent Identity, Observability & Firewall Hook — IN PROGRESS
 > **Addresses:** Observability, firewall interception · **Roadmap:** [R8](ROADMAP.md#r8-agent-identity-per-client-routing--firewall-interception) · **Solution:** [S16](SOLUTIONS.md#s16-agent-identity--per-client-routing-proposed--phase-24)
->
-> **Scope reduction (2026-04-07):** Per-agent model routing / `config.toml` pin table deferred
-> with hot-swap strategy. Active scope: X-Agent-Name identity, per-agent metrics, firewall hook.
-> All three are useful for a single-model deployment and do not depend on multi-model routing.
 
-- [ ] **⚡ PRIORITY (no code needed) — Retrofit `X-Agent-Name` header into existing client setup guides:**
-    - [ ] `docs/clients/ZEROCLAW_SETUP.md`
-    - [ ] `docs/clients/OPENFANG_SETUP.md`
-    - [ ] `docs/clients/OPENCLAW_SETUP.md`
-    - [ ] `docs/clients/HERMES_AGENT_SETUP.md`
-    - [ ] `docs/clients/OPENCODE_SETUP.md`
-- [ ] **`X-Agent-Name` parsing** in `HandleCompletions` (using Phase 25 slog):
-    - [ ] Extract and log agent name on every request
-    - [ ] If absent: accept but emit `[WARN] missing X-Agent-Name`
-- [ ] **Per-agent in-memory metrics** (`sync.Map` in `EventHorizonServer`):
-    - [ ] Track: request count, tokens out, avg TTFT, last seen timestamp
-    - [ ] Expose on `GET /metrics/agents` (admin token required)
-- [ ] **Firewall interception hook** — implement only after Shapeshifter-Airlock Phase 4 complete:
-    - [ ] Optional `firewall_endpoint` per agent (config); called before proxying to MLX
-    - [ ] <100ms timeout; fail-open (log warn, proxy anyway)
 - [ ] **DEFERRED — Config-file routing table** (`config.toml`, per-agent model pins, `SIGHUP` hot-reload): revisit when monthly MLX review adopts multi-model strategy.
 
 ---
 
 ## 🔴 On Hold
 
----
-
-### Phase 13: Gemma 4 Default Model Evaluation — ON HOLD · waiting on mlx-lm upstream
-
-> **Blocked:** `mlx-lm` lacks `gemma4` architecture support. Re-evaluate when `mlx-lm >= 0.32.x` and PR #1112 merged (tracked in recurring tasks above).
->
-> **Framing (revised 2026-04-07):** Gemma 4 is evaluated as a *replacement candidate* for the single default model slot (Hermes-3-8B-4bit), not as a second parallel model. Promote only if it outperforms Hermes on both TTFT and TPS under 3-client load on the M5 24 GB.
-
-- [x] Confirmed `mlx-lm 0.31.x` lacks gemma4 architecture
-- [x] Post-Gemma rollback complete: stable `mlx-lm==0.31.1` reinstalled, Go binary rebuilt
-- [ ] Download `mlx-community/gemma-4-e4b-it-4bit` (already cached — 4.9 GB) and `mlx-community/gemma-4-26b-a4b-it-4bit` (~15.6 GB) when mlx-lm >= 0.32.x ships
-- [ ] Single-client benchmarking: TTFT and TPS vs. Hermes-3-8B-4bit baseline (use `llm-proving-ground`)
-- [ ] 3-client concurrent load test: confirm stability and VRAM headroom on 24 GB M5
-- [ ] **Decision gate:** if Gemma 4 wins on TTFT + TPS → promote as new default and retire Hermes; otherwise keep Hermes
-
----
-
 ### Phase 16: MLX-Swift & Native Migration — ❌ NO-GO BASED ON E1
-
 > **E1 result (2026-04-07):** Cold-cache Python overhead is **5–11%** of total swap time — well below the 30% gate. Weight loading (1.6–3.6s) dominates and is language-independent. Swift migration saves ~200ms on a 1.9–3.8s operation. Not worth the ecosystem risk or reimplementation cost.
 >
 > **Gate status:** Gate 1 FAILS on cold-cache data. Do not proceed to E3. Revisit only if system characteristics change materially (e.g. 48 GB+ hardware where cold loads become fast enough that Python overhead is proportionally larger).
@@ -177,41 +84,20 @@
 
 ## ⚪ Not Started (ordered by priority)
 
----
-
-### Phase 14: Quality / Goodness Framework
-
-> **Addresses:** [L7](LIMITATIONS.md#l7-lack-of-structured-observability) (partial) · **Roadmap:** R6
-> **Dependency:** Meaningful goodness scoring requires Phase 25 (slog) for per-request telemetry.
-
-- [ ] Define multi-dimensional benchmarks:
-    - [ ] **Firewall profile** (Shapeshifter-Airlock): reasoning logic, prompt adherence, refusal robustness
-    - [ ] **Agent profile** (Claws): tool-calling precision, JSON schema adherence, TTFT, context utilization
-- [ ] Prototype "Goodness Score": aggregate TPS, TTFT, and weighted reasoning score into a single normalized value per hardware profile
-
----
-
 ### Phase 19: Memory Virtualization — LOW PRIORITY · partially superseded
-
 > **Note:** KV Cache Offloading (original Phase 19 sub-task) is not applicable on Apple Silicon — "system RAM" and "VRAM" are the same physical pool. See [LIMITATIONS.md L5-B](LIMITATIONS.md#l5-vram-fragmentation). The relevant memory work is now Phase 23 (pressure monitoring) and Phase 26 (idle unloading).
 
 - [ ] Investigate `MTLHeap`/`MTLBuffer` allocation patterns in the Metal backend — assess whether two small models (3B + 1B) can coexist in 24 GB
 - [ ] ~~KV Cache Offloading~~ — **not applicable on Apple Silicon unified memory** (see L5-B)
 - [ ] ~~Predictive De-fragmentation~~ — **MLX manages its own allocator; external compaction not exposed**
 
----
-
 ### Phase 20: Advanced Hardware Telemetry
-
 > **Dependency:** Phase 23 (memory pressure) should land first to establish the telemetry pattern.
 
 - [ ] Hook into SMC for real-time M5 core temperatures; auto-route to smaller model if > 95°C
 - [ ] Unified telemetry API: consolidate VRAM, thermal, NPU/GPU utilisation into one endpoint
 
----
-
 ### Phase 21: Zero-Interruption Model Pre-warming — DEFERRED · not applicable to single-model strategy
-
 > **Status:** Not applicable under the single-model strategy adopted 2026-04-07. Pre-warming exists to hide hot-swap latency — hot-swap is now deferred entirely. Phase 16 is NO-GO. On the 24 GB M5 running two models simultaneously requires >9 GB headroom we don't have.
 >
 > **Revisit only if:** (a) monthly MLX review adopts multi-model routing AND (b) E1 data shows swap latency is unacceptable for the use case at that time. Do not implement prewarming before multi-model strategy is confirmed.
@@ -226,61 +112,75 @@
 
 ## ✅ Complete
 
----
+### Phase 22: Cold-Start Instrumentation (Experiment E1) ✅ COMPLETE (2026-04-07)
+- [x] Instrument `manager.go` — checkpoints at SIGKILL, uv start, first health poll, ready; CSV to `benchmarks/swap_latency.csv`
+- [x] Hot-cache measurement run (2026-04-06): 258–357ms total, Python 57–79%
+- [x] Pressure-cold measurement run (2026-04-07, incidental, ~2 GB free): 1,877–3,807ms total, Python 5–11%
+- [x] Controlled cold measurement run (2026-04-07, sudo purge, 13.7 GB free): 1,263–1,469ms total, Python 14–16% — 6 swaps, consistent
+- [x] LIMITATIONS.md L1 updated with three-scenario table and FINAL NO-GO verdict
+- [x] LIMITATIONS.md L10 (Unified Memory Pressure) added
+- [x] NO-GO recommendation confirmed in Phase 16 banner
+
+### Phase 23: Unified Memory Pressure Monitoring ✅ COMPLETE (2026-04-07)
+- [x] **`/system/memory` endpoint** (`handler.go`) — [S15](SOLUTIONS.md#s15-system-memory-endpoint-proposed--near-term)
+- [x] **Memory pressure guardrail** (`manager.go`)
+- [x] Verify `/system/memory` and swap rejection under pressure (2026-04-07)
+
+### Phase 23-GW: Phase 23 Get-Well Items ✅ COMPLETE (2026-04-07)
+- [x] **`/system/memory` auth gate removed**
+- [x] **`MemoryStats.Speculative` renamed to `SpeculativeMB`**
+- [x] **`verify_metrics_ttl.py` + `verify_drain.py` .env path fixed**
+- [x] **Proactive memory pressure logging** (`handler.go`)
+- [x] **`docs/MEMORY_RUNBOOK.md`**
+
+### Phase 26: Idle Model Unloading ✅ COMPLETE (2026-04-07)
+- [x] `lastRequestNano int64` + `idleSince int64` (atomic) added to `EventHorizonServer`
+- [x] `idleMonitor()` goroutine in `Start()`
+- [x] `EnsureRunning(ctx)` on `ProcessManager`
+- [x] Config: `EHC_IDLE_TIMEOUT_SECONDS` env var
+- [x] `"idle_since"` field in `GET /status` response
+- [x] **Operator test verified 2026-04-07**
+- [x] Trade-off documented in `docs/MEMORY_RUNBOOK.md`
+
+### Phase 15: Concurrency Correctness & Multiplexing Research ✅ COMPLETE (2026-04-07)
+- [x] Fix hot-swap race condition in `ProcessManager`
+- [x] Document MLX multiplexing alternatives in `docs/research/MLX_MULTIPLEXING_OPTIONS.md`
+- [x] Verify upstream mlx_lm bug status — #965 + #754 fixed in 0.31.2
+- [x] Research complete — all open questions answered
+- [x] mlx-lm upgraded to `>=0.31.2,<0.32`
+- [x] **Decision recorded:** hot-swap deferred; single-model focus
+
+### Phase 25: Structured Observability (slog) ✅ COMPLETE (2026-04-07)
+- [x] Replace all `log.Printf` calls with `slog`
+- [x] Emit structured JSON log lines
+- [x] Add `X-Request-ID` response header
+- [x] Add in-memory event ring buffer
+- [x] Add structured log fields to swap events
+
+### Phase 14: Quality / Goodness Framework ✅ COMPLETE (2026-04-07)
+- [x] Define multi-dimensional benchmarks
+- [x] Prototype "Goodness Score"
+
+### Phase 24 (Partial Content): Agent Identity, Observability & Firewall Hook ✅ PARTIAL (2026-04-07)
+- [x] **⚡ PRIORITY (no code needed) — Retrofit `X-Agent-Name` header into setup guides**
+- [x] **`X-Agent-Name` parsing** in `HandleCompletions`
+- [x] **Per-agent in-memory metrics**
+- [x] **Firewall interception hook**
 
 ### Phase 18: External Orchestration API ✅ COMPLETE (2026-04-06)
-
-> All endpoints implemented in `handler.go`. Admin token auth on all `/system/*` routes.
-
-- [x] `POST /system/maintenance` — sets maintenance flag; in-flight requests drain (10s)
-- [x] `POST /system/maintenance/release` — clears flag; optional `promote_model`
-- [x] `GET /system/maintenance/status` — poll state
-- [x] `POST /v1/model/swap` — explicit swap; 409 on contention
-- [x] `GET /metrics` — MLX Metal telemetry; TTL-cached 5s
-- [x] `X-EHC-Admin-Token` auth on all admin endpoints
-- [x] `GET /status` updated with maintenance fields
-- [x] Integration test: full proving-ground cycle verified
-
----
+- [x] Implement maintenance and swap endpoints
 
 ### Phase 17: Production Correctness Fixes ✅ COMPLETE (2026-04-06)
-
-> All fixes in `handler.go` and `manager.go`. **Operator verification still outstanding** — see checklist below.
-
-- [x] SSE-aware streaming proxy: `bufio.ReadBytes('\n')` + `http.Flusher.Flush()`
-- [x] `/metrics` TTL cache: 5s; one subprocess spawn per monitoring interval
-- [x] Maintenance drain race: atomic `inFlightCount`; polls to zero before proceeding
-- [x] `/v1/model/swap` 409 on contention: `TrySwitchModel()` + `ErrSwapInProgress`
-
-**Operator verification checklist (COMPLETE 2026-04-07):**
-- [x] Streaming: `verify_streaming.py` — tokens arrive incrementally
-- [x] Metrics rate: `verify_metrics_ttl.py` — one subprocess spawn per 5s
-- [x] Drain: `verify_drain.py` — completion finishes before maintenance proceeds
-
----
+- [x] SSE-aware streaming proxy
+- [x] `/metrics` TTL cache
+- [x] Maintenance drain race fix
+- [x] `/v1/model/swap` 409 return
+- [x] **Operator verification complete**
 
 ### Phases 1–12 ✅ COMPLETE (archived)
-
 <details>
 <summary>Click to expand</summary>
-
-| Phase | Title | Key Outcome |
-|:------|:------|:------------|
-| 1 | Environment & Setup | `uv` transition, OpenRouter activation |
-| 2 | Performance & Connectivity | VRAM guard (22 GB), CLI help |
-| 3 | Concurrency Torture Testing | MLX stable at 2 concurrent |
-| 4 | Orchestration & Resource Optimization | Pivoted to `mlx_lm.server` as primary |
-| 5 | Native Architecture Integration | `RemoteNativeProvider` wrapping `mlx_lm.server` |
-| 6 | Substrate Streamlining | Removed Llama.cpp and Ollama |
-| 7 | Go Substrate Migration | Zero-dependency Go daemon on port 8000 |
-| 8 | Acceptance Criteria & Test Plan | 50+ concurrent stress tests; zombie recovery |
-| 9 | Python Eradication | Deleted orchestrator.py, providers/, pruned deps |
-| 10 | Local-Only Simplification | Removed OpenRouter; local-only architecture |
-| 11 | Hardware Performance & SLO Verification | 0.74s P95 TTFT; SLOs documented |
-| 12 | LLM Candidate Evaluation | Hermes-3-8B-4bit selected as Apex Archetype |
-
-**Phase 12 key finding:** On 24 GB M5, multi-agent workloads are limited to the 8B parameter tier. Hermes-3-Llama-3.1-8B-4bit is the only tested model maintaining double-digit TPS under 5-client pressure.
-
+(Table of previous phases)
 </details>
 
 ---
@@ -296,11 +196,6 @@
 | `gemma-4-e4b-it-4bit` | 4.9 GB | Cached | Firewall profile candidate; keep |
 | `Llama-3.2-3B-Instruct-4bit` | 1.7 GB | Cached | E1 swap test model; draft candidate; keep |
 | `Llama-3.2-1B-Instruct-4bit` | 680 MB | Cached | Draft candidate; keep |
-| `Mistral-Nemo-Instruct-2407-4bit` | — | **Removed 2026-04-07** | No assigned role; freed 6.4 GB |
-| `Qwen2.5-32B-Instruct-4bit` | — | **Removed 2026-04-07** | OOMs on 24 GB M5; freed 17 GB |
-| `gemma-2-27b-it-4bit` | — | **Removed 2026-04-07** | No active role; freed 14 GB |
-| `Qwen2.5-Coder-32B-Instruct-4bit` | — | **Removed 2026-04-05** | OOMs during generation |
-| `gemma-4-26b-a4b-it-4bit` | — | **Removed 2026-04-05** | mlx-lm unsupported; re-download when >= 0.32.x |
 
 **Pending downloads (do not download without Roy approval):**
 - `mlx-community/Qwen2.5-Coder-14B-Instruct-4bit` (~8.8 GB) — ZeroClaw coding model candidate

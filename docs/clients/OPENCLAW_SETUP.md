@@ -1,29 +1,33 @@
-# OpenClaw & ZeroClaw Setup
+# OpenClaw Setup
 
-This guide explains how to connect agentic "claws" to the **Event Horizon Core** Go Substrate.
+This guide explains how to connect the **OpenClaw** agentic framework to the **Event Horizon Core** Go Substrate.
 
-## Using the Go Proxy as the Host
+## Connection Details
 
-Both OpenClaw and ZeroClaw are optimized for the OpenAI-compatible API. The Event Horizon Core provides this via its background daemon.
+OpenClaw is optimized for the OpenAI-compatible API provided by the Event Horizon Core background daemon.
 
 ### 1. Identify your local endpoint
 By default, the core uses:
-- `http://localhost:8000/v1`
+- **URL**: `http://localhost:8000/v1`
+- **API Key**: `sk-antigravity` (Any string works)
 
-### 2. Configure the Claw
-In your `openclaw/config.yaml` or `.env`:
+### 2. Configure OpenClaw
+Update your `openclaw/config.yaml` or `.env`:
 
 ```env
 OPENAI_API_BASE=http://localhost:8000/v1
-OPENAI_API_KEY=sk-antigravity # Any string works
-MODEL=mlx-community/Llama-3.1-8B-Instruct-4bit
+OPENAI_API_KEY=sk-antigravity
+MODEL=mlx-community/Hermes-4-Llama-3.1-8B-4bit
 ```
 
-## Recommended Models for Agentic Work
+## Recommended Models
 
 For **OpenClaw (Autonomous Logic)**:
-- `mlx-community/Llama-3.1-8B-Instruct-4bit` (Best function calling)
-- `mlx-community/Mistral-7B-Instruct-v0.3-4bit` (Great for tool-use)
+- `mlx-community/Hermes-4-Llama-3.1-8B-4bit` (Apex tool-use precision)
+- `mlx-community/Qwen3.5-9B-Instruct-4bit` (Best generalist for multiturn chat)
 
-For **ZeroClaw (Minimalist)**:
-- `mlx-community/Llama-3.2-3B-Instruct-4bit` (Extremely fast on M5)
+## Event Horizon Core Requirements
+To properly interface with the Event Horizon orchestration substrate, this client **MUST** inject the `X-Agent-Name` HTTP header into all `/v1/chat/completions` API requests.
+Failure to provide this header will trigger server-side warnings and eventually firewall interception.
+
+Example: `X-Agent-Name: openclaw`

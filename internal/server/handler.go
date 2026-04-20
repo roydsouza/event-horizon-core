@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -31,10 +32,25 @@ type metricsCache struct {
 	fetchedAt time.Time
 }
 
+type AgentMetrics struct {
+	mu            sync.Mutex
+	RequestCount  int64   `json:"request_count"`
+	TokensOut     int64   `json:"tokens_out"`
+	TotalTTFT_Ms  int64   `json:"-"`
+	AvgTTFT_Ms    int64   `json:"avg_ttft_ms"`
+	TotalGen_Ms   int64   `json:"-"`
+	AvgTPS        float64 `json:"avg_tps"`
+	LastSeenNano  int64   `json:"last_seen_nano"`
+}
+
 type EventHorizonServer struct {
 	supervisor *supervisor.ProcessManager
 	port       int
 	mux        *http.ServeMux
+	ring       *EventRingBuffer
+
+	agentMetrics sync.Map
+
 
 	maintMu          sync.RWMutex
 	maintenanceMode  bool
@@ -54,11 +70,12 @@ type EventHorizonServer struct {
 	idleSince       int64
 }
 
-func NewEventHorizonServer(pm *supervisor.ProcessManager, port int) *EventHorizonServer {
+func NewEventHorizonServer(pm *supervisor.ProcessManager, port int, ring *EventRingBuffer) *EventHorizonServer {
 	s := &EventHorizonServer{
 		supervisor: pm,
 		port:       port,
 		mux:        http.NewServeMux(),
+		ring:       ring,
 	}
 
 	s.mux.HandleFunc("/v1/chat/completions", s.HandleCompletions)
@@ -69,14 +86,16 @@ func NewEventHorizonServer(pm *supervisor.ProcessManager, port int) *EventHorizo
 	s.mux.HandleFunc("/system/maintenance/status", s.adminAuthMiddleware(s.HandleMaintenanceStatus))
 	s.mux.HandleFunc("/v1/model/swap", s.adminAuthMiddleware(s.HandleModelSwap))
 	s.mux.HandleFunc("/metrics", s.adminAuthMiddleware(s.HandleMetrics))
+	s.mux.HandleFunc("/metrics/agents", s.adminAuthMiddleware(s.HandleAgentMetrics))
 	s.mux.HandleFunc("/system/memory", s.HandleMemory)
+	s.mux.HandleFunc("/debug/events", s.adminAuthMiddleware(s.HandleDebugEvents))
 
 	return s
 }
 
 func (s *EventHorizonServer) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
-	log.Printf("[Server] Event Horizon Daemon listening on %s", addr)
+	slog.Info("Event Horizon Daemon listening", "addr", addr)
 	go s.pressureMonitor()
 	go s.idleMonitor()
 	return http.ListenAndServe(addr, s.mux)
@@ -99,11 +118,11 @@ func (s *EventHorizonServer) pressureMonitor() {
 		}
 		switch stats.Pressure {
 		case supervisor.PressureWarn:
-			log.Printf("[WARN memory-pressure] Elevated: %d MB free (warn threshold: 2048 MB). Consider closing browser tabs before any model swap.", stats.TotalFreeMB)
+			slog.Warn("memory-pressure elevated", "free_mb", stats.TotalFreeMB, "warn_threshold", 2048)
 		case supervisor.PressureCritical:
-			log.Printf("[WARN memory-pressure] CRITICAL: %d MB free (critical threshold: 1024 MB). Model swaps will be aborted until pressure drops.", stats.TotalFreeMB)
+			slog.Warn("memory-pressure critical", "free_mb", stats.TotalFreeMB, "critical_threshold", 1024)
 		case supervisor.PressureNormal:
-			log.Printf("[INFO memory-pressure] Returned to normal: %d MB free.", stats.TotalFreeMB)
+			slog.Info("memory-pressure normal", "free_mb", stats.TotalFreeMB)
 		}
 		last = stats.Pressure
 	}
@@ -116,11 +135,11 @@ func (s *EventHorizonServer) pressureMonitor() {
 func (s *EventHorizonServer) idleMonitor() {
 	timeoutSec, err := strconv.ParseInt(os.Getenv("EHC_IDLE_TIMEOUT_SECONDS"), 10, 64)
 	if err != nil || timeoutSec <= 0 {
-		log.Printf("[Server] Idle unloading disabled (set EHC_IDLE_TIMEOUT_SECONDS>0 to enable)")
+		slog.Info("Idle unloading disabled")
 		return
 	}
 	idleTimeout := time.Duration(timeoutSec) * time.Second
-	log.Printf("[Server] Idle unloading enabled: model unloads after %v of inactivity", idleTimeout)
+	slog.Info("Idle unloading enabled", "timeout", idleTimeout)
 
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
@@ -133,13 +152,13 @@ func (s *EventHorizonServer) idleMonitor() {
 			continue // already stopped or in a transition
 		}
 		if time.Since(time.Unix(0, last)) > idleTimeout {
-			log.Printf("[Server] Model idle for >%v. Unloading to release Metal memory (~4.6 GB).", idleTimeout)
+			slog.Info("Model idle across timeout. Unloading.", "timeout", idleTimeout)
 			if err := s.supervisor.IdleUnload(); err != nil {
-				log.Printf("[Server] Idle unload failed: %v", err)
+				slog.Error("Idle unload failed", "error", err)
 				continue
 			}
 			atomic.StoreInt64(&s.idleSince, time.Now().UnixNano())
-			log.Printf("[Server] Model unloaded. Poll /system/memory to confirm Metal memory released.")
+			slog.Info("Model unloaded")
 		}
 	}
 }
@@ -176,7 +195,32 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 	inMaintenance := s.maintenanceMode
 	s.maintMu.RUnlock()
 
-	if inMaintenance {
+	b := make([]byte, 8)
+	rand.Read(b)
+	reqID := fmt.Sprintf("%x", b)
+	w.Header().Set("X-Request-ID", reqID)
+
+	agentName := r.Header.Get("X-Agent-Name")
+	if agentName == "" {
+		slog.Warn("missing X-Agent-Name", "remote_addr", r.RemoteAddr)
+		agentName = "anonymous"
+	}
+	
+	amItf, _ := s.agentMetrics.LoadOrStore(agentName, &AgentMetrics{})
+	am := amItf.(*AgentMetrics)
+
+	am.mu.Lock()
+	am.RequestCount++
+	am.LastSeenNano = time.Now().UnixNano()
+	am.mu.Unlock()
+
+	slog.Info("request", "agent", agentName, "request_id", reqID, "model", s.supervisor.CurrentModel())
+
+	adminToken := r.Header.Get("X-EHC-Admin-Token")
+	expectedToken := os.Getenv("EHC_ADMIN_TOKEN")
+	isAdmin := expectedToken != "" && adminToken == expectedToken
+
+	if inMaintenance && !isAdmin {
 		w.Header().Set("Retry-After", "60")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -192,7 +236,7 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 
 	// If model was unloaded by idle timeout, restart it before serving.
 	if s.supervisor.GetStatus() == supervisor.StatusStopped {
-		log.Printf("[Server] Model was idle-unloaded. Restarting for incoming request...")
+		slog.Info("Model was idle-unloaded. Restarting for incoming request")
 		if err := s.supervisor.EnsureRunning(context.Background()); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to restart idle model: %v", err), http.StatusServiceUnavailable)
 			return
@@ -226,9 +270,9 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 	// context.Background() is intentional — a client disconnect must not cancel
 	// a swap mid-flight, which would leave mlx_lm.server in an inconsistent state.
 	if req.Model != "" && req.Model != s.supervisor.CurrentModel() && req.Model != "default" {
-		log.Printf("[Server] Client requested model %s, but %s is currently loaded. Initiating Hot-Swap...", req.Model, s.supervisor.CurrentModel())
+		slog.Info("Hot-Swap Initiated", "requested_model", req.Model, "current_model", s.supervisor.CurrentModel())
 		if err := s.supervisor.SwitchModel(context.Background(), req.Model); err != nil {
-			log.Printf("[Server] Hot-Swap Failed: %v", err)
+			slog.Error("Hot-Swap Failed", "error", err, "model", req.Model)
 			http.Error(w, fmt.Sprintf("Failed to load model %s: %v", req.Model, err), http.StatusInternalServerError)
 			return
 		}
@@ -245,10 +289,30 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 		proxyReq.Header[k] = v
 	}
 
+	// Firewall hook stub (Phase 24)
+	if fwBase := os.Getenv("EHC_AGENT_FIREWALL_ENDPOINT"); fwBase != "" {
+		fwURL := fmt.Sprintf("%s/v1/firewall/check", fwBase)
+		fwReq, _ := http.NewRequest(http.MethodPost, fwURL, bytes.NewReader([]byte(fmt.Sprintf(`{"agent":"%s"}`, agentName))))
+		fwReq.Header.Set("Content-Type", "application/json")
+		
+		fwClient := &http.Client{Timeout: 100 * time.Millisecond}
+		fwResp, fwErr := fwClient.Do(fwReq)
+		if fwErr != nil {
+			slog.Warn("firewall hook failed (fail-open)", "agent", agentName, "error", fwErr)
+		} else {
+			fwResp.Body.Close()
+			if fwResp.StatusCode >= 400 {
+				slog.Warn("firewall hook rejected request", "agent", agentName, "status", fwResp.StatusCode)
+				// Fail-open for now. Strict mode will block later.
+			}
+		}
+	}
+
+	proxyStart := time.Now()
 	client := &http.Client{Timeout: 300 * time.Second}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
-		log.Printf("[Server] Proxy error to MLX: %v", err)
+		slog.Error("Proxy error to MLX", "error", err)
 		http.Error(w, "Error connecting to MLX backend. Is the server running?", http.StatusServiceUnavailable)
 		return
 	}
@@ -266,17 +330,59 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 	// arrives as one chunk and is written in a single pass — behaviour is unchanged.
 	flusher, canFlush := w.(http.Flusher)
 	reader := bufio.NewReaderSize(resp.Body, 4096)
+	
+	firstChunk := true
+	var chunkCount int64
+
 	for {
 		chunk, readErr := reader.ReadBytes('\n')
 		if len(chunk) > 0 {
+			if firstChunk {
+				ttft := time.Since(proxyStart).Milliseconds()
+				am.mu.Lock()
+				am.TotalTTFT_Ms += ttft
+				if am.RequestCount > 0 {
+					am.AvgTTFT_Ms = am.TotalTTFT_Ms / am.RequestCount
+				}
+				am.LastSeenNano = time.Now().UnixNano()
+				am.mu.Unlock()
+				firstChunk = false
+			}
+
 			w.Write(chunk)
 			if canFlush {
 				flusher.Flush()
+			}
+
+			// Count chunks starting with "data: " as ~tokens
+			if bytes.HasPrefix(chunk, []byte("data: ")) && !bytes.Contains(chunk, []byte("[DONE]")) {
+				chunkCount++
 			}
 		}
 		if readErr != nil {
 			break
 		}
+	}
+
+	// Update token counts
+	genDurationMs := time.Since(proxyStart).Milliseconds()
+	
+	if chunkCount > 0 {
+		am.mu.Lock()
+		am.TokensOut += chunkCount
+		am.TotalGen_Ms += genDurationMs
+		if am.TotalGen_Ms > 0 {
+			am.AvgTPS = float64(am.TokensOut) / (float64(am.TotalGen_Ms) / 1000.0)
+		}
+		am.mu.Unlock()
+	} else if !firstChunk {
+		am.mu.Lock()
+		am.TokensOut += 1 // Generic default for non-streamed full responses
+		am.TotalGen_Ms += genDurationMs
+		if am.TotalGen_Ms > 0 {
+			am.AvgTPS = float64(am.TokensOut) / (float64(am.TotalGen_Ms) / 1000.0)
+		}
+		am.mu.Unlock()
 	}
 }
 
@@ -334,7 +440,7 @@ func (s *EventHorizonServer) HandleMaintenance(w http.ResponseWriter, r *http.Re
 		time.Sleep(100 * time.Millisecond)
 	}
 	if remaining := atomic.LoadInt64(&s.inFlightCount); remaining > 0 {
-		log.Printf("[Server] Maintenance drain timeout: %d request(s) still in-flight, proceeding anyway", remaining)
+		slog.Warn("Maintenance drain timeout", "remaining_in_flight", remaining)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -358,7 +464,7 @@ func (s *EventHorizonServer) HandleMaintenanceRelease(w http.ResponseWriter, r *
 
 	promoted := false
 	if req.PromoteModel != "" && req.PromoteModel != s.supervisor.CurrentModel() {
-		log.Printf("[Server] Hot-Swapping Model (Promote): -> %s", req.PromoteModel)
+		slog.Info("Hot-Swapping Model (Promote)", "to", req.PromoteModel)
 		if err := s.supervisor.SwitchModel(context.Background(), req.PromoteModel); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to swap to promote_model %s: %v", req.PromoteModel, err), http.StatusInternalServerError)
 			return
@@ -434,7 +540,7 @@ func (s *EventHorizonServer) HandleModelSwap(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	log.Printf("[Server] Explicit model swap: %s -> %s", current, req.Model)
+	slog.Info("Explicit model swap", "from", current, "to", req.Model)
 	if err := s.supervisor.TrySwitchModel(context.Background(), req.Model); err != nil {
 		if err == supervisor.ErrSwapInProgress {
 			w.Header().Set("Content-Type", "application/json")
@@ -444,7 +550,7 @@ func (s *EventHorizonServer) HandleModelSwap(w http.ResponseWriter, r *http.Requ
 			})
 			return
 		}
-		log.Printf("[Server] Explicit swap failed: %v", err)
+		slog.Error("Explicit swap failed", "error", err)
 		http.Error(w, fmt.Sprintf("Failed to load model %s: %v", req.Model, err), http.StatusInternalServerError)
 		return
 	}
@@ -481,7 +587,7 @@ func (s *EventHorizonServer) HandleMetrics(w http.ResponseWriter, r *http.Reques
 	cmdStr := "import mlx.core; import json; print(json.dumps({'active_mb': mlx.core.metal.get_active_memory()//1024//1024, 'peak_mb': mlx.core.metal.get_peak_memory()//1024//1024}))"
 	out, err := exec.Command("uv", "run", "python", "-c", cmdStr).Output()
 	if err != nil {
-		log.Printf("[Server] Metrics error: %v", err)
+		slog.Error("Metrics error", "error", err)
 		http.Error(w, "Failed to fetch metrics", http.StatusInternalServerError)
 		return
 	}
@@ -509,4 +615,38 @@ func (s *EventHorizonServer) HandleMemory(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
+}
+
+func (s *EventHorizonServer) HandleDebugEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if s.ring == nil {
+		w.Write([]byte("[]"))
+		return
+	}
+	events := s.ring.GetEvents()
+	json.NewEncoder(w).Encode(events)
+}
+
+func (s *EventHorizonServer) HandleAgentMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	metrics := make(map[string]AgentMetrics)
+	s.agentMetrics.Range(func(key, value any) bool {
+		agentName := key.(string)
+		am := value.(*AgentMetrics)
+		am.mu.Lock()
+		metrics[agentName] = *am
+		am.mu.Unlock()
+		return true
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metrics)
 }

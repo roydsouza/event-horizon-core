@@ -4,7 +4,7 @@ Event Horizon Core is the station's high-performance inference engine for Apple 
 
 ## Project Role & Relationships
 - **Function**: Operates as the primary production deployment node for all inferencing tasks, exposing an OpenAI-compatible API on port 8000.
-- **Orchestration**: Directs traffic and maintenance locks via the **[ehc-lpg](../ehc-lpg/)** layer.
+- **Orchestration**: Directs traffic and maintenance locks via the **[sync](../sync/)** layer.
 - **Validation**: Accepts model candidates only after successful verification in the **[llm-proving-ground](../llm-proving-ground/)**.
 - **Usage**: Serves as the inference backbone for all station agents and IDE integrations (e.g., Doom Emacs).
 
