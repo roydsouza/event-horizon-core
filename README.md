@@ -1,11 +1,12 @@
-# Event Horizon Core
+# Event Horizon Core (EHC): Local Inference Backbone
 
-**Local LLM inference orchestration for Apple Silicon M5.**  
-A Go daemon that manages `mlx_lm.server`, exposes an OpenAI-compatible HTTP API on port 8000, and coordinates multi-agent access with maintenance mode, model swapping, and memory telemetry.
+Event Horizon Core is the station's high-performance inference engine for Apple Silicon, managing local Large Language Model (LLM) execution via MLX.
 
-> **Cross-references:** [INTEGRATION.md](INTEGRATION.md) · [LIMITATIONS.md](LIMITATIONS.md) · [ROADMAP.md](ROADMAP.md) · [TASKS.md](TASKS.md)
-
----
+## Project Role & Relationships
+- **Function**: Operates as the primary production deployment node for all inferencing tasks, exposing an OpenAI-compatible API on port 8000.
+- **Orchestration**: Directs traffic and maintenance locks via the **[ehc-lpg](../ehc-lpg/)** layer.
+- **Validation**: Accepts model candidates only after successful verification in the **[llm-proving-ground](../llm-proving-ground/)**.
+- **Usage**: Serves as the inference backbone for all station agents and IDE integrations (e.g., Doom Emacs).
 
 ## Architecture
 
@@ -97,6 +98,16 @@ Admin token is read from `EHC_ADMIN_TOKEN` env var (`.env`, never committed).
 | Throughput | > 20 tok/s | 21.8 tok/s | 10-client concurrent load |
 
 > **Cold-swap note:** On the 24 GB M5 with ~2 GB free RAM, the filesystem cache is frequently evicted by browser tabs and other apps, making cold swaps the norm. Hot-swap SLO assumes a quiet system.
+
+---
+
+## Station Pipeline
+
+Event Horizon Core acts as the final production deployment node for all inferencing. The deployment workflow behaves as follows:
+
+1. **[LLM Proving Ground](../llm-proving-ground/README.md)**: Explores newer/better LLMs by downloading candidates from HuggingFace. It commands Event Horizon Core to enter `/system/maintenance` mode (which gracefully stalls active clients) in order to securely run benchmarking harnesses (via live inference routes) isolated from real network load.
+2. **[LLM Factory](../llm-factory/README.md)**: If candidates fall slightly short on schema adherence or tool routing, they may optionally be sent to the Factory for fine-tuning/enhancing. The factory outputs are then bounced back to the Proving Ground for re-validation.
+3. **Event Horizon Core**: Successfully evaluated finalists are seamlessly swapped utilizing the `/v1/model/swap` endpoint and permanently recorded into `config.toml`.
 
 ---
 
