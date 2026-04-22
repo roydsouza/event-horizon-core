@@ -91,6 +91,7 @@ type ProcessManager struct {
 	mu         sync.RWMutex // protects modelPath and status field reads/writes
 	cmd        *exec.Cmd
 	modelPath  string
+	engine     Engine
 	port       int
 	status     ServerStatus
 	cancelFunc context.CancelFunc
@@ -99,6 +100,7 @@ type ProcessManager struct {
 func NewProcessManager(modelPath string, port int) *ProcessManager {
 	return &ProcessManager{
 		modelPath: modelPath,
+		engine:    &MLXEngine{},
 		port:      port,
 		status:    StatusStopped,
 	}
@@ -116,22 +118,10 @@ func (pm *ProcessManager) Start(ctx context.Context) (time.Time, time.Time, erro
 	model := pm.modelPath
 	pm.mu.Unlock()
 
-	slog.Info("Starting MLX server", "model", model, "port", pm.port)
+	slog.Info("Starting server", "engine", pm.engine.ID(), "model", model, "port", pm.port)
 
-	args := []string{"run", "mlx_lm.server",
-		"--model", pm.modelPath,
-		"--port", fmt.Sprintf("%d", pm.port),
-		"--prompt-cache-size", "512",
-		"--prompt-concurrency", "4",   // single-model strategy: ≤3 concurrent clients (default 8)
-		"--decode-concurrency", "4",   // single-model strategy: ≤3 concurrent clients (default 32)
-	}
-
-	if draft := os.Getenv("MLX_DRAFT_MODEL"); draft != "" {
-		slog.Info("Enabling Speculative Decoding", "draft_model", draft)
-		args = append(args, "--draft-model", draft)
-	}
-
-	pm.cmd = exec.CommandContext(ctx, "uv", args...)
+	args := pm.engine.GetArgs(pm.modelPath, pm.port)
+	pm.cmd = exec.CommandContext(ctx, pm.engine.Executable(), args...)
 	pm.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	pm.cmd.Stdout = os.Stdout
@@ -202,36 +192,46 @@ func (pm *ProcessManager) WaitUntilHealthy(ctx context.Context) (time.Time, time
 	}
 }
 
-// SwitchModel swaps the active model. Blocks until any in-progress swap completes.
-// Use TrySwitchModel if you need non-blocking behaviour (e.g. explicit /v1/model/swap API).
-func (pm *ProcessManager) SwitchModel(ctx context.Context, newModelPath string) error {
+// SwitchModel swaps the active model/engine. Blocks until any in-progress swap completes.
+func (pm *ProcessManager) SwitchModel(ctx context.Context, newModelPath string, engineName string) error {
 	pm.swapMu.Lock()
 	defer pm.swapMu.Unlock()
-	return pm.doSwitch(ctx, newModelPath)
+	return pm.doSwitch(ctx, newModelPath, engineName)
 }
 
 // TrySwitchModel is like SwitchModel but returns ErrSwapInProgress immediately
-// if a swap is already running, rather than blocking.
-func (pm *ProcessManager) TrySwitchModel(ctx context.Context, newModelPath string) error {
+func (pm *ProcessManager) TrySwitchModel(ctx context.Context, newModelPath string, engineName string) error {
 	if !pm.swapMu.TryLock() {
 		return ErrSwapInProgress
 	}
 	defer pm.swapMu.Unlock()
-	return pm.doSwitch(ctx, newModelPath)
+	return pm.doSwitch(ctx, newModelPath, engineName)
 }
 
 // doSwitch is the shared implementation; callers must hold swapMu.
-func (pm *ProcessManager) doSwitch(ctx context.Context, newModelPath string) error {
+func (pm *ProcessManager) doSwitch(ctx context.Context, newModelPath string, engineName string) error {
 	pm.mu.RLock()
-	current := pm.modelPath
+	currentModel := pm.modelPath
+	currentEngine := pm.engine.ID()
 	pm.mu.RUnlock()
 
-	if current == newModelPath {
-		slog.Info("Model already loaded, skipping redundant swap", "model", newModelPath)
+	if engineName == "" {
+		engineName = currentEngine
+	}
+
+	if currentModel == newModelPath && currentEngine == engineName {
+		slog.Info("Model and engine already active, skipping redundant swap", "model", newModelPath, "engine", engineName)
 		return nil
 	}
 
-	slog.Info("Hot-Swapping Model", "from", current, "to", newModelPath)
+	newEngine, err := GetEngine(engineName)
+	if err != nil {
+		return err
+	}
+
+	slog.Info("Hot-Swapping Hardware State", 
+		"from_model", currentModel, "to_model", newModelPath,
+		"from_engine", currentEngine, "to_engine", engineName)
 
 	// Phase 23: Check memory pressure before committing to a swap.
 	stats, err := GetMemoryStats()
@@ -253,6 +253,7 @@ func (pm *ProcessManager) doSwitch(ctx context.Context, newModelPath string) err
 
 	pm.mu.Lock()
 	pm.modelPath = newModelPath
+	pm.engine = newEngine
 	pm.mu.Unlock()
 
 	uvStart, firstHealth, err := pm.Start(ctx)
@@ -264,7 +265,7 @@ func (pm *ProcessManager) doSwitch(ctx context.Context, newModelPath string) err
 	// Capture Metrics
 	metrics := SwapMetrics{
 		Timestamp:      readyTime.Format(time.RFC3339),
-		FromModel:      current,
+		FromModel:      currentModel,
 		ToModel:        newModelPath,
 		KillDuration:   float64(exitTime.Sub(killStart).Microseconds()) / 1000.0,
 		StartupDelay:   float64(firstHealth.Sub(uvStart).Microseconds()) / 1000.0,
@@ -273,7 +274,10 @@ func (pm *ProcessManager) doSwitch(ctx context.Context, newModelPath string) err
 		PythonOverhead: (float64(firstHealth.Sub(uvStart).Nanoseconds()) / float64(readyTime.Sub(killStart).Nanoseconds())) * 100.0,
 	}
 
-	slog.Info("swap", "from", current, "to", newModelPath, "duration_ms", metrics.TotalDuration, "trigger", "explicit")
+	slog.Info("swap", 
+		"from_model", currentModel, "to_model", newModelPath, 
+		"from_engine", currentEngine, "to_engine", engineName,
+		"duration_ms", metrics.TotalDuration, "trigger", "explicit")
 	
 	if err := appendMetricsToCSV(metrics); err != nil {
 		slog.Error("Failed to log swap metrics", "error", err)
@@ -353,6 +357,12 @@ func (pm *ProcessManager) CurrentModel() string {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.modelPath
+}
+
+func (pm *ProcessManager) CurrentEngine() string {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.engine.ID()
 }
 
 func (pm *ProcessManager) GetStatus() ServerStatus {

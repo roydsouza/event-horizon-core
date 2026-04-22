@@ -9,8 +9,8 @@
 
 | Model ID (HuggingFace) | Parameters | Format | Recommended Role |
 | :--- | :--- | :--- | :--- |
-| `mlx-community/Hermes-4-Llama-3.1-8B-4bit` | 8B | Q4 | **Apex Archetype**: Gold standard for agentic steering and tool use. |
-| `mlx-community/Qwen3.5-9B-Instruct-4bit` | 9B | Q4 | **Generalist**: Exceptional performance on Chinese/Multi-lingual and coding tasks. |
+| `mlx-community/Hermes-3-Llama-3.1-8B-4bit` | 8B | Q4 | **Apex Archetype**: Gold standard for agentic steering and tool use. |
+| `mlx-community/Qwen2.5-9B-Instruct-4bit` | 9B | Q4 | **Generalist**: Exceptional performance on Chinese/Multi-lingual and coding tasks. |
 | `mlx-community/Gemma-4-E4B-it-4bit` | 4.8B | Q4 | **Edge Agent**: Ultra-fast inference with native multimodal support. |
 
 ---

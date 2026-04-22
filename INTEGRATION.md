@@ -2,7 +2,7 @@
 
 > **Cross-references:** [ROADMAP.md](ROADMAP.md) · [LIMITATIONS.md](LIMITATIONS.md) · [SOLUTIONS.md](SOLUTIONS.md) · [docs/clients/](docs/clients/)
 
-EHC exposes a local HTTP server on **port 8000** that is drop-in compatible with the OpenAI Chat Completions API. All station agents (Claws, firewall, monitoring daemons) connect here. The Go daemon proxies requests to `mlx_lm.server` on port 8080 and manages the model lifecycle.
+EHC exposes a local HTTP server on **port 8000** that is drop-in compatible with the OpenAI Chat Completions API. It manages multiple inference engines (**MLX-LM**, **Bodega**, **vLLM**) and provides a unified interface for all station agents (Claws, firewall, monitoring daemons).
 
 ---
 
@@ -39,8 +39,11 @@ Omitting it is accepted today (request is processed, warning logged) but will be
 | `POST` | `/system/maintenance` | Enter maintenance mode — new completions get 503. |
 | `POST` | `/system/maintenance/release` | Exit maintenance mode. Optional `promote_model` field. |
 | `GET`  | `/system/maintenance/status` | Poll maintenance state and active model. |
-| `POST` | `/v1/model/swap` | Explicit model swap. Returns 409 if swap already in progress. |
+| `POST` | `/v1/model/swap` | Explicit model/engine swap. Returns 409 if swap already in progress. |
 | `GET`  | `/metrics` | MLX Metal memory telemetry (`active_mb`, `peak_mb`). TTL-cached 5s. |
+| `GET`  | `/metrics/agents` | Per-agent usage metrics (TTFT, TPS, Token counts). |
+| `GET`  | `/system/memory` | Host memory pressure (free, speculative, wired, etc.). |
+| `GET`  | `/debug/events` | In-memory ring buffer of recent daemon events (JSON). |
 
 Admin token is read from the `EHC_ADMIN_TOKEN` environment variable (set in `.env`, never committed). All `/system/*` and `/metrics` calls are rejected with HTTP 401 if the token is absent or wrong.
 
@@ -152,3 +155,19 @@ EHC runs on a 24 GB unified memory M5. The active model (~4.6 GB for Hermes-3-8B
 3. Verify EHC is running: `curl http://127.0.0.1:8000/status`.
 4. Do **not** hardcode a `model` field — let EHC resolve it from the routing table (once Phase 24 lands).
 5. Use `--dry-run` mode in any script that touches the maintenance API before running live.
+
+---
+
+## Universal Interface Rationale
+
+EHC has standardized on the **OpenAI Chat Completions API (`/v1/chat/completions`)** as its primary integration surface. 
+
+### Why OpenAI Format?
+- **De Facto Industry Standard**: As of 2026, the OpenAI format is the "lingua franca" of LLM tools. Almost every modern agent (OpenRouter, LiteLLM, LangChain), model aggregator, and IDE integration (Doom Emacs, Cursor) supports it out-of-the-box.
+- **Zero Vendor Lock-in**: By using this format, we can swap between **MLX-LM**, **Bodega**, and **vLLM** backends without changing a single line of code in our station agents.
+- **OpenRouter Compatibility**: Since OpenRouter itself uses the OpenAI format as its gateway interface, EHC acts as a local "OpenRouter node" for your M5, allowing you to use OpenRouter-compatible tools locally.
+
+### Why not native Anthropic/Google/AWS Bedrock?
+While native APIs for Claude (Anthropic) or Gemini (Google) have specific benefits (like massive context windows or native multimodal tokens), their schemas are highly divergent. Adopting them would require writing per-agent translation layers. 
+
+**EHC handles this by acting as the Translator.** It accepts a standardized OpenAI-formatted request and performs the necessary internal routing and hardware orchestration to satisfy it on the best available local engine.

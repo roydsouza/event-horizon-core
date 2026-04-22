@@ -43,7 +43,7 @@ go build -o event-horizon ./cmd/event-horizon/
 # Check status
 curl http://127.0.0.1:8000/status
 
-# Send a completion (X-Agent-Name is required)
+# Send a completion (X-Agent-Name is REQUIRED)
 curl http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "X-Agent-Name: my-agent" \
@@ -70,6 +70,9 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 | `GET`  | `/system/maintenance/status` | Poll state: `in_maintenance`, `requested_by`, `since`. |
 | `POST` | `/v1/model/swap` | Explicit swap. Returns 409 if already in progress. |
 | `GET`  | `/metrics` | MLX Metal memory: `active_mb`, `peak_mb`. Cached 5s. |
+| `GET`  | `/metrics/agents` | Per-agent usage metrics (TTFT, TPS, Token counts). |
+| `GET`  | `/system/memory` | Host memory pressure (free, speculative, wired, etc.). |
+| `GET`  | `/debug/events` | In-memory ring buffer of recent daemon events (JSON). |
 
 Admin token is read from `EHC_ADMIN_TOKEN` env var (`.env`, never committed).
 

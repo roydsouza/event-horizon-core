@@ -11,6 +11,7 @@ Located in `internal/`, the Go substrate is responsible for:
 - **Process Management** (`internal/supervisor`): Dynamically launches, monitors, and hot-swaps `mlx_lm.server` instances.
 - **Anti-Zombie Mutex**: Uses Process Groups (`syscall.Setpgid`) to bind child processes to the daemon. If the daemon is killed, the entire process tree (including MLX) is instantly reaped by the OS.
 - **HTTP Proxy** (`internal/server`): An OpenAI-compatible REST server (Port 8000) that implements blocking hot-swap middleware.
+- **Structured Logging & Events**: Uses `slog` with a custom `EventRingBuffer` (last 200 events) exposed via `/debug/events`.
 
 ### 2. Python Thin Client
 Located in `event_horizon_core/`, the Python package provides the `event-horizon` CLI. It contains zero inference logic and acts purely as a proxy to the Go Daemon.
@@ -26,8 +27,9 @@ go build -o event-horizon ./cmd/event-horizon
 ### Running in Development
 To run the daemon manually for debugging:
 ```bash
-./event-horizon start --port 8000
+./event-horizon
 ```
+The daemon will use the default port (8000) and model unless environment variables are set.
 
 ## 🔄 Hot-Swap Implementation Details
 

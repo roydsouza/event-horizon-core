@@ -181,7 +181,7 @@ func (s *EventHorizonServer) HandleStatus(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":                   status,
 		"port":                     s.port,
-		"engine":                   "mlx_lm.server",
+		"engine":                   s.supervisor.CurrentEngine(),
 		"maintenance_mode":         mMode,
 		"maintenance_requested_by": mReqBy,
 		"maintenance_since":        mSince,
@@ -260,20 +260,23 @@ func (s *EventHorizonServer) HandleCompletions(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Extract requested model
+	// Extract requested model and engine
 	var req struct {
-		Model string `json:"model"`
+		Model  string `json:"model"`
+		Engine string `json:"engine"`
 	}
 	json.Unmarshal(body, &req)
 
 	// Trigger hot-swap if the client requested a different model.
 	// context.Background() is intentional — a client disconnect must not cancel
 	// a swap mid-flight, which would leave mlx_lm.server in an inconsistent state.
-	if req.Model != "" && req.Model != s.supervisor.CurrentModel() && req.Model != "default" {
-		slog.Info("Hot-Swap Initiated", "requested_model", req.Model, "current_model", s.supervisor.CurrentModel())
-		if err := s.supervisor.SwitchModel(context.Background(), req.Model); err != nil {
-			slog.Error("Hot-Swap Failed", "error", err, "model", req.Model)
-			http.Error(w, fmt.Sprintf("Failed to load model %s: %v", req.Model, err), http.StatusInternalServerError)
+	// Trigger hot-swap if the client requested a different model or engine.
+	if (req.Model != "" && req.Model != s.supervisor.CurrentModel() && req.Model != "default") ||
+		(req.Engine != "" && req.Engine != s.supervisor.CurrentEngine()) {
+		slog.Info("Hot-Swap Initiated", "requested_model", req.Model, "requested_engine", req.Engine)
+		if err := s.supervisor.SwitchModel(context.Background(), req.Model, req.Engine); err != nil {
+			slog.Error("Hot-Swap Failed", "error", err, "model", req.Model, "engine", req.Engine)
+			http.Error(w, fmt.Sprintf("Failed to load state: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -465,7 +468,7 @@ func (s *EventHorizonServer) HandleMaintenanceRelease(w http.ResponseWriter, r *
 	promoted := false
 	if req.PromoteModel != "" && req.PromoteModel != s.supervisor.CurrentModel() {
 		slog.Info("Hot-Swapping Model (Promote)", "to", req.PromoteModel)
-		if err := s.supervisor.SwitchModel(context.Background(), req.PromoteModel); err != nil {
+		if err := s.supervisor.SwitchModel(context.Background(), req.PromoteModel, ""); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to swap to promote_model %s: %v", req.PromoteModel, err), http.StatusInternalServerError)
 			return
 		}
@@ -518,7 +521,8 @@ func (s *EventHorizonServer) HandleModelSwap(w http.ResponseWriter, r *http.Requ
 	}
 
 	var req struct {
-		Model string `json:"model"`
+		Model  string `json:"model"`
+		Engine string `json:"engine"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Error parsing request", http.StatusBadRequest)
@@ -540,18 +544,18 @@ func (s *EventHorizonServer) HandleModelSwap(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	slog.Info("Explicit model swap", "from", current, "to", req.Model)
-	if err := s.supervisor.TrySwitchModel(context.Background(), req.Model); err != nil {
+	slog.Info("Explicit model/engine swap", "from", current, "to", req.Model, "engine", req.Engine)
+	if err := s.supervisor.TrySwitchModel(context.Background(), req.Model, req.Engine); err != nil {
 		if err == supervisor.ErrSwapInProgress {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": "model swap already in progress — poll /system/maintenance/status and retry",
+				"error": "swap already in progress — poll /system/maintenance/status and retry",
 			})
 			return
 		}
 		slog.Error("Explicit swap failed", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to load model %s: %v", req.Model, err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to load state: %v", err), http.StatusInternalServerError)
 		return
 	}
 
