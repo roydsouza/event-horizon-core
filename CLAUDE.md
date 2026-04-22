@@ -48,16 +48,28 @@ Always check `TASKS.md` (and `tasks/` subdirectory if present) on session open t
 
 ## 6. Governance Process
 
-This project is governed by the shared **Sync coordination layer** at `../sync/`.
+Process law: `~/antigravity/agents/PROCESS.md` (authoritative — read on every session open).
 
 - **Forge** (AntiGravity/Gemini) builds features and fixes defects.
-- **Crucible** (AntiGravity/Gemini) independently re-runs verification and issues Review Verdicts.
-- **Claude Code** audits architectural decisions, VRAM safety changes, and model promotion gates.
+- **Crucible** (AntiGravity/Gemini) independently re-runs verification and issues verdicts.
+- **Claude Code** audits VRAM safety changes, DEFECTS.md regressions, and architectural decisions.
 - **Roy** routes work between entities and makes all promotion decisions.
 
-Read `../sync/ANTIGRAVITY_RULES.md` at session start. File verdicts to `../sync/crucible-verdicts/`. File audit requests to `../sync/auditor-inbox/`. See `../sync/CLAUDE.md` for the authoritative process spec, including the coexistence contract and audit trigger list.
+| Gate command | When |
+|:-------------|:-----|
+| `python3 forge/gate.py session-start` | Start of every Forge session |
+| `python3 forge/gate.py lock <task-id>` | Before beginning a task |
+| `python3 forge/gate.py pre-submit` | Before filing to `crucible-inbox/` |
+| `python3 forge/gate.py unlock` | After CLEARED verdict received |
+| `python3 crucible/gate.py session-start` | Start of every Crucible session |
+| `python3 crucible/gate.py pre-verdict --scripts-run` | Before filing to `crucible-verdicts/` |
 
-**DEFECTS.md** in this directory is the contract for bug fixes — always check it before `TASKS.md`.
+**DEFECTS.md** is the contract for bug fixes — always check it before `TASKS.md`.
+
+**Escalation triggers (always route to Claude Code via `analyst-inbox/`):**
+- Any change to VRAM hard cap (`internal/server/`) or anti-zombie mutex (`internal/supervisor/`)
+- Any change to `forge/gate.py`, `crucible/gate.py`, or `CLAUDE.md`
+- Promotion of a new model to production routing in EHC
 
 ## 7. Downstream Consumers
 

@@ -65,3 +65,10 @@ event-horizon-*
 .vscode/
 .idea/
 .DS_Store
+
+# Forge/Crucible harness runtime state (not source — do not commit)
+forge/lock.json
+forge/signals.jsonl
+crucible/lock.json
+crucible/signals.jsonl
+build-artifacts/
